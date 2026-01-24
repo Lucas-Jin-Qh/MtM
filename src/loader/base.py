@@ -322,11 +322,17 @@ class BaseDataset(torch.utils.data.Dataset):
         binned_spikes_data = binned_spikes_data[0]
 
         if self.load_meta:
-            if 'cluster_depths' in data:
-                neuron_depths = np.array(data['cluster_depths']).astype(np.float32)
+            # Safely load neuron metadata; if missing or empty, create sensible defaults
+            raw_depths = data.get('cluster_depths', [])
+            if raw_depths is None or len(raw_depths) == 0:
+                neuron_depths = np.arange(binned_spikes_data.shape[1]).astype(np.float32)
             else:
-                neuron_depths = np.array([np.nan])
-            neuron_regions = np.array(data['cluster_regions']).astype('str')
+                neuron_depths = np.array(raw_depths).astype(np.float32)
+            raw_regions = data.get('cluster_regions', [])
+            if raw_regions is None or len(raw_regions) == 0:
+                neuron_regions = np.array(['void'] * binned_spikes_data.shape[1])
+            else:
+                neuron_regions = np.array(raw_regions).astype('str')
         else:
             neuron_depths = neuron_regions = np.array([np.nan])
             

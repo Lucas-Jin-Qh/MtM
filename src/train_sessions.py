@@ -22,22 +22,49 @@ kwargs = {
 
 config = config_from_kwargs(kwargs)
 config = update_config("src/configs/ndt1_stitching_prompting.yaml", config)
-config = update_config("src/configs/ssl_sessions_trainer.yaml", config)
+config = update_config("src/configs/ssl_session_trainer.yaml", config)
 
 # set seed for reproducibility
 set_seed(config.seed)
 
 # download dataset from huggingface
-eid = None
-train_dataset, val_dataset, test_dataset, meta_data = load_ibl_dataset(config.dirs.dataset_cache_dir, 
+eid = config.data.train_session_eid[0]
+# Prefer aligned path from config if provided, otherwise fall back to the known local aligned path
+aligned_data_dir = config.dirs.aligned_data_dir if getattr(config.dirs, "aligned_data_dir", None) else "data/4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
+_res = load_ibl_dataset(config.dirs.dataset_cache_dir, 
                            config.dirs.huggingface_org,
                            eid=eid,
+                           aligned_data_dir=aligned_data_dir,
                            num_sessions=config.data.num_sessions,
                            split_method=config.data.split_method,
                            test_session_eid=config.data.test_session_eid,
                            batch_size=config.training.train_batch_size,
-                           use_re=config.data.use_re,
+                           use_re=getattr(config.data, "use_re", False),
                            seed=config.seed)
+# load_ibl_dataset may return either (train, val, test, meta_data) or (train, val, test)
+if isinstance(_res, tuple) and len(_res) == 4:
+    train_dataset, val_dataset, test_dataset, meta_data = _res
+elif isinstance(_res, tuple) and len(_res) == 3:
+    train_dataset, val_dataset, test_dataset = _res
+    # minimal meta_data so downstream code can continue
+    # infer num_neurons from the saved HF dataset (spikes_sparse_shape)
+    try:
+        first_shape = train_dataset["spikes_sparse_shape"][0]
+        # spikes_sparse_shape may be [n_timebins, n_neurons] or [n_neurons, n_timebins]
+        if hasattr(first_shape, "__len__") and len(first_shape) >= 2:
+            # choose the larger dimension as neuron count
+            n_neurons = int(first_shape[1]) if int(first_shape[1]) > int(first_shape[0]) else int(first_shape[0])
+        else:
+            n_neurons = int(first_shape)
+    except Exception:
+        n_neurons = None
+    meta_data = {
+        "eids": [eid],
+        "num_neurons": [n_neurons] if n_neurons is not None else [],
+        "num_sessions": 1,
+    }
+else:
+    raise RuntimeError(f"Unexpected return from load_ibl_dataset: {_res}")
 if config.data.use_aligned_test:
     # aligned dataset
     if eid is None:
@@ -97,6 +124,29 @@ val_dataloader = make_loader(val_dataset,
                          stitching=config.encoder.stitching,
                          shuffle=False)
 
+# Fallback: if grouped sampler produced zero batches, construct a simple DataLoader wrapper
+try:
+    if len(train_dataloader) == 0:
+        print("Fallback: grouped sampler produced zero batches, creating simple DataLoader instead.")
+        from loader.base import BaseDataset
+        import torch as _torch
+        train_ds_wrapped = BaseDataset(dataset=train_dataset,
+                                       target=config.data.target,
+                                       pad_value=-1.,
+                                       max_time_length=config.data.max_time_length,
+                                       max_space_length=config.data.max_space_length,
+                                       pad_to_right=True,
+                                       sort_by_depth=config.data.sort_by_depth,
+                                       sort_by_region=config.data.sort_by_region,
+                                       load_meta=config.data.load_meta,
+                                       brain_region=getattr(config.data, 'brain_region', 'all'),
+                                       dataset_name=config.data.dataset_name,
+                                       stitching=config.encoder.stitching)
+        train_dataloader = _torch.utils.data.DataLoader(train_ds_wrapped, batch_size=config.training.train_batch_size, shuffle=True)
+except Exception:
+    # if any unexpected error occurs, leave original dataloader
+    pass
+
 # Initialize the accelerator
 accelerator = Accelerator()
 
@@ -104,14 +154,20 @@ accelerator = Accelerator()
 NAME2MODEL = {"NDT1": NDT1, "STPatch": STPatch}
 
 config = update_config(config, meta_data)
+print("meta_data:", meta_data)
 model_class = NAME2MODEL[config.model.model_class]
 model = model_class(config.model, **config.method.model_kwargs, **meta_data)
 model = accelerator.prepare(model)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=config.optimizer.lr, weight_decay=config.optimizer.wd, eps=config.optimizer.eps)
+# Guard against zero-length dataloader (compute a sensible fallback)
+steps_per_epoch = len(train_dataloader) if len(train_dataloader) > 0 else max(1, (len(train_dataset) // max(1, config.training.train_batch_size)))
+total_steps = (config.training.num_epochs * steps_per_epoch) // max(1, config.optimizer.gradient_accumulation_steps)
+if total_steps <= 0:
+    total_steps = 1
 lr_scheduler = OneCycleLR(
                 optimizer=optimizer,
-                total_steps=config.training.num_epochs*len(train_dataloader) //config.optimizer.gradient_accumulation_steps,
+                total_steps=total_steps,
                 max_lr=config.optimizer.lr,
                 pct_start=config.optimizer.warmup_pct,
                 div_factor=config.optimizer.div_factor,

@@ -12,7 +12,32 @@ class DATASET_MODES:
     test = "test"
     trainval = "trainval"
 
-DATA_COLUMNS = ['spikes_sparse_data', 'spikes_sparse_indices', 'spikes_sparse_indptr', 'spikes_sparse_shape','cluster_depths']
+DATA_COLUMNS = [
+    'spikes_sparse_data',
+    'spikes_sparse_indices',
+    'spikes_sparse_indptr',
+    'spikes_sparse_shape',
+    'cluster_depths',
+    # common behavior fields (kept so select_columns doesn't drop them)
+    'choice',
+    'block',
+    'wheel',
+    'left-whisker',
+    'right-whisker',
+    # per-sample metadata fields commonly added by create_dataset
+    'binsize',
+    'interval_len',
+    'eid',
+    'probe_name',
+    'subject',
+    'lab',
+    'sampling_freq',
+    'cluster_regions',
+    'cluster_channels',
+    'good_clusters',
+    'cluster_uuids',
+    'cluster_qc',
+]
 TARGET_EIDS="data/target_eids.txt"
 TEST_RE_EIDS="data/test_re_eids.txt"
 
@@ -60,20 +85,23 @@ def create_dataset(binned_spikes, bwm_df, eid, params, meta_data=None, binned_be
         data_dict.update(binned_behaviors)
         
     if meta_data is not None:
+        # Use .get with sensible defaults so preprocessing doesn't fail when some session-level
+        # metadata keys are missing (e.g., single merged probe sessions).
+        n_samples = len(sparse_binned_spikes)
         meta_dict = {
-            'binsize': [params['binsize']] * len(sparse_binned_spikes),
-            'interval_len': [params['interval_len']] * len(sparse_binned_spikes),
-            'eid': [meta_data['eid']] * len(sparse_binned_spikes),
-            'probe_name': [meta_data['probe_name']] * len(sparse_binned_spikes),
-            'subject': [meta_data['subject']] * len(sparse_binned_spikes),
-            'lab': [meta_data['lab']] * len(sparse_binned_spikes),
-            'sampling_freq': [meta_data['sampling_freq']] * len(sparse_binned_spikes),
-            'cluster_regions': [meta_data['cluster_regions']] * len(sparse_binned_spikes),
-            'cluster_channels': [meta_data['cluster_channels']] * len(sparse_binned_spikes),
-            'cluster_depths': [meta_data['cluster_depths']] * len(sparse_binned_spikes),
-            'good_clusters': [meta_data['good_clusters']] * len(sparse_binned_spikes),
-            'cluster_uuids': [meta_data['uuids']] * len(sparse_binned_spikes),
-            'cluster_qc': [meta_data['cluster_qc']] * len(sparse_binned_spikes),
+            'binsize': [params.get('binsize')] * n_samples,
+            'interval_len': [params.get('interval_len')] * n_samples,
+            'eid': [meta_data.get('eid')] * n_samples,
+            'probe_name': [meta_data.get('probe_name', 'merged')] * n_samples,
+            'subject': [meta_data.get('subject')] * n_samples,
+            'lab': [meta_data.get('lab')] * n_samples,
+            'sampling_freq': [meta_data.get('sampling_freq', None)] * n_samples,
+            'cluster_regions': [meta_data.get('cluster_regions', [])] * n_samples,
+            'cluster_channels': [meta_data.get('cluster_channels', [])] * n_samples,
+            'cluster_depths': [meta_data.get('cluster_depths', [])] * n_samples,
+            'good_clusters': [meta_data.get('good_clusters', [])] * n_samples,
+            'cluster_uuids': [meta_data.get('uuids', [])] * n_samples,
+            'cluster_qc': [meta_data.get('cluster_qc', [])] * n_samples,
         }
         data_dict.update(meta_dict)
 

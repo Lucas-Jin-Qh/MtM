@@ -21,29 +21,31 @@ dirs:
   # dataset_dir: /home/ppwang/neural-data-transformers/data/lfads_lorenz.h5
   pretrained_model_path: checkpoints/train/multi_sessions/model_NDT1/method_ssl/mask_combined/model_best.pt
   # dataset_dir: berkott/ibl_ssl_data
-  aligned_data_dir:  null
+  aligned_data_dir: "data/4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
   huggingface_org: ibl-foundation-model
   dataset_dir: ibl-foundation-model/671c7ea7-6726-4fbe-adeb-f89c2c8e489b_aligned
+  behav_dir: "4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
   
 
 
 # Training configuration
 training:
-  num_epochs: 300
-  train_batch_size: 8
-  test_batch_size: 8  
+  num_epochs: 500
+  train_batch_size: 32
+  test_batch_size: 32  
   shuffle_test_dataloader: false    # Shuffle test dataloader between epochs
 
-  save_plot_every_n_epochs: 1  # Plot the model output every n epochs
+  save_plot_every_n_epochs: 50  # Plot the model output every n epochs
   save_every: 50  # Save checkpoint
-  eval_every: null  # Eval model
+  eval_every: 50  # Eval model
 
-  finetune: true
+  finetune: false
+  dummy: false
 
 # Model configuration. 
 # Will be passed to the model __init__  method if a model is not passed to the Trainer __init__ method.
-model: 
-  model_class: null   # Any registered model class name. 
+model:
+  model_class: NDT1   # Use NDT1 for session-level MtM
 
 # Data configuration.
 data:
@@ -63,8 +65,8 @@ data:
   LOG_EPSILON: 1.e-7 # epsilon for log transformation, to prevent log(0)
   use_lograte: True # use lograte
 
-  max_time_length: 100    # max_time_length has to be a multiple of time patch size
-  max_space_length: 668   # max_space_length has to be a multiple of space patch size
+  max_time_length: 60    # max_time_length has to be a multiple of time patch size
+  max_space_length: 427   # max_space_length has to be a multiple of space patch size
   patching: true # patching the neurons
   sort_by_depth: false
   sort_by_region: false
@@ -73,13 +75,17 @@ data:
   include_behav: true # include behavior data
   target: null
 
+  use_re: false
+
   num_sessions: 1
   test_session_eid: [] #["671c7ea7-6726-4fbe-adeb-f89c2c8e489b"]
 
   split_method: predefined # random_split/session_based/predefined
 
-  use_aligned_test: True
+  # For single-session training specify the session EID here
+  train_session_eid: ["4b00df29-3769-43be-bb40-128b1cba6d35"]
 
+  use_aligned_test: False
   load_meta: true
 
   spike_augmentation: false

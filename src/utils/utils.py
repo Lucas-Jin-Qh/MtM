@@ -502,15 +502,15 @@ def prep_cond_matrix(test_dataset):
     b_list = []
     # choice
     choice = np.array(test_dataset['choice'])
-    choice = np.tile(np.reshape(choice, (choice.shape[0], 1)), (1, 100))
+    choice = np.tile(np.reshape(choice, (choice.shape[0], 1)), (1, 60))
     b_list.append(choice)
     # reward
     reward = np.array(test_dataset['reward'])
-    reward = np.tile(np.reshape(reward, (reward.shape[0], 1)), (1, 100))
+    reward = np.tile(np.reshape(reward, (reward.shape[0], 1)), (1, 60))
     b_list.append(reward)
     # block
     block = np.array(test_dataset['block'])
-    block = np.tile(np.reshape(block, (block.shape[0], 1)), (1, 100))
+    block = np.tile(np.reshape(block, (block.shape[0], 1)), (1, 60))
     b_list.append(block)
     # wheel
     wheel = np.array(test_dataset['wheel-speed'])

@@ -162,9 +162,8 @@ cython_debug/
 playground/
 
 # intermediate files
-*.log
-*.txt
-*cache*
+
+cache/
 *png
 wandb
 results
@@ -176,3 +175,9 @@ data
 
 *gz
 *results*
+
+#datasets
+precached/
+raw/
+precached_video/
+precached_embeddings/
