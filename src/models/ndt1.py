@@ -1,4 +1,5 @@
 import os
+import math
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
@@ -571,6 +572,9 @@ class NDT1(nn.Module):
 
         config = update_config(DEFAULT_CONFIG, config)
         self.method = kwargs["method_name"]
+        # Record whether decoder outputs log(rate) (use_lograte) and binsize for unit alignment
+        self.use_lograte = kwargs.get("use_lograte", True)
+        self.binsize = kwargs.get("binsize", None)
         
         # Build encoder
         encoder_pt_path = config["encoder"].pop("from_pt", None)
@@ -720,13 +724,25 @@ class NDT1(nn.Module):
             #             targets, targets_mask = targets[:,:,:self.n_channels], targets_mask[:,:,:self.n_channels]
             #         else:
             #             outputs = outputs[:,:,:targets.shape[2]]
+            # Prepare outputs_for_loss: if model outputs log(rate) (use_lograte),
+            # convert to log(expected_counts_per_bin) by adding log(binsize) when binsize is available.
+            outputs_for_loss = outputs
+            use_lograte = getattr(self, "use_lograte", True)
+            binsize_val = getattr(self, "binsize", None)
+            if use_lograte:
+                if binsize_val is not None:
+                    outputs_for_loss = outputs + math.log(float(binsize_val))
+                else:
+                    # If binsize unknown, assume outputs are already log(expected_counts) or leave as-is.
+                    outputs_for_loss = outputs
+
             if self.encoder.mask:
-                loss = (self.loss_fn(outputs, targets) * targets_mask).sum()
+                loss = (self.loss_fn(outputs_for_loss, targets) * targets_mask).sum()
             else:
-                loss = self.loss_fn(outputs, targets).sum()
+                loss = self.loss_fn(outputs_for_loss, targets).sum()
             n_examples = targets_mask.sum()
         elif self.method == "ctc":
-            loss = self.loss_fn(outputs.transpose(0,1), targets, spikes_lengths, targets_len)
+            loss = self.loss_fn(outputs.transpose(0,1), targets, spikes_lengths, targets_lengths)
             n_examples = torch.Tensor([len(targets)]).to(loss.device, torch.long)
         elif self.method == "sl":
             loss = self.loss_fn(outputs, targets).sum()

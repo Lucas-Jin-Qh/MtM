@@ -11,7 +11,7 @@ wandb:
   use: true
   entity: null
   project: single-session
-  run_name: 671c7ea7
+  run_name: 4b00df29
 
 # Logging directories
 dirs:
@@ -23,7 +23,7 @@ dirs:
   # dataset_dir: berkott/ibl_ssl_data
   aligned_data_dir: "data/4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
   huggingface_org: ibl-foundation-model
-  dataset_dir: ibl-foundation-model/671c7ea7-6726-4fbe-adeb-f89c2c8e489b_aligned
+  dataset_dir: ibl-foundation-model/4b00df29-3769-43be-bb40-128b1cba6d35_aligned
   behav_dir: "4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
   
 

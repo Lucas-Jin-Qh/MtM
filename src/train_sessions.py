@@ -156,7 +156,18 @@ NAME2MODEL = {"NDT1": NDT1, "STPatch": STPatch}
 config = update_config(config, meta_data)
 print("meta_data:", meta_data)
 model_class = NAME2MODEL[config.model.model_class]
-model = model_class(config.model, **config.method.model_kwargs, **meta_data)
+# Pass binsize into model so model / loss can align units (log(rate) vs log(expected_counts))
+# Safely extract binsize from config.data (some config wrappers may raise on getattr)
+binsize = None
+try:
+    binsize = config.data.binsize
+except Exception:
+    try:
+        binsize = config.data.get("binsize", None)
+    except Exception:
+        binsize = None
+
+model = model_class(config.model, binsize=binsize, **config.method.model_kwargs, **meta_data)
 model = accelerator.prepare(model)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=config.optimizer.lr, weight_decay=config.optimizer.wd, eps=config.optimizer.eps)
