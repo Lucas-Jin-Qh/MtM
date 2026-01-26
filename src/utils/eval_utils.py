@@ -18,6 +18,7 @@ import numpy as np
 from sklearn.cluster import SpectralClustering
 import matplotlib.colors as colors
 import os
+import json
 from trainer.make import make_trainer
 from pathlib import Path
 
@@ -33,70 +34,179 @@ PROMPTING_MODE=['neuron', 'causal', 'inter-region', 'intra-region']
 # --------------------------------------------------------------------------------------------------
 
 def load_model_data_local(**kwargs):
-    model_config = kwargs['model_config']
-    trainer_config = kwargs['trainer_config']
-    model_path = kwargs['model_path']
-    dataset_path = kwargs['dataset_path']
-    test_size = kwargs['test_size']
-    seed = kwargs['seed']
-    mask_name = kwargs['mask_name']
-    mask_mode = mask_name.split("_")[1]
-    eid = kwargs['eid']
-    stitching = kwargs['stitching']
-    num_sessions = kwargs['num_sessions']
+    """
+    Load model, accelerator, dataset and dataloader for evaluation.
+    Supports local aligned dataset saved by precache.py (or create_dataset).
+    Falls back to huggingface if local path not provided or not found.
+    """
+    model_config = kwargs.get('model_config')
+    trainer_config = kwargs.get('trainer_config')
+    model_path = kwargs.get('model_path')
+    dataset_path = kwargs.get('dataset_path')
+    seed = kwargs.get('seed', 42)
+    mask_name = kwargs.get('mask_name', 'mask_all')
+    eid = kwargs.get('eid')
+    test_size = kwargs.get('test_size')
+    stitching = kwargs.get('stitching', False)
+    num_sessions = kwargs.get('num_sessions', 1)
 
     # set seed
     set_seed(seed)
 
-    # load the model
+    # load the model config
     config = config_from_kwargs({"model": f"include:{model_config}"})
     config = update_config(model_config, config)
     config = update_config(trainer_config, config)
+    # masking mode
+    mask_mode = mask_name.split("_")[1] if "_" in mask_name else mask_name
     config.model.encoder.masker.mode = mask_mode
 
     accelerator = Accelerator()
 
-    _,_,_, meta_data = load_ibl_dataset(
-                            cache_dir=config.dirs.dataset_cache_dir,
-                            user_or_org_name=config.dirs.huggingface_org,
-                            num_sessions=1,
-                            split_method="predefined",
-                            test_session_eid=[],
-                            batch_size=config.training.train_batch_size,
-                            seed=seed,
-                            eid=eid
-                        )
-    print(meta_data)
+    # ----- load dataset (prefer local) -----
+    dataset = None
+    meta_data = {}
+    if dataset_path and os.path.isdir(dataset_path):
+        try:
+            # load the whole DatasetDict then select "test"
+            ds_dict = load_from_disk(dataset_path)
+            if isinstance(ds_dict, dict) and "test" in ds_dict:
+                dataset = ds_dict["test"]
+                logger.info(f"Loaded local test split from {dataset_path}")
+            else:
+                # maybe it's already a single dataset (no split)
+                dataset = ds_dict
+                logger.info(f"Loaded local dataset (no splits) from {dataset_path}")
+            # try to load session metadata if present
+            meta_json = os.path.join(dataset_path, "session_metadata.json")
+            if os.path.exists(meta_json):
+                with open(meta_json, "r") as fh:
+                    meta_data = json.load(fh)
+                logger.info("Loaded session_metadata.json")
+                # Ensure num_neurons is in meta_data (required by NDT1 model)
+                # NeuralStitcher expects num_neurons as a list
+                if "num_neurons" not in meta_data:
+                    # Try to infer from cluster_regions length
+                    if "cluster_regions" in meta_data:
+                        meta_data["num_neurons"] = [len(meta_data["cluster_regions"])]
+                        logger.info(f"Inferred num_neurons from cluster_regions: {meta_data['num_neurons']}")
+                    else:
+                        # Will be inferred later from dataset
+                        logger.warning("No cluster_regions in metadata, num_neurons will be inferred later")
+                elif isinstance(meta_data.get("num_neurons"), int):
+                    # Convert to list format for NeuralStitcher
+                    meta_data["num_neurons"] = [meta_data["num_neurons"]]
+                    logger.info(f"Converted num_neurons to list: {meta_data['num_neurons']}")
+        except Exception as e:
+            logger.warning(f"Failed to load local dataset from {dataset_path}: {e}")
 
-    model_class = NAME2MODEL[config.model.model_class]
-    model = model_class(config.model, **config.method.model_kwargs, **meta_data)    
-    model = torch.load(model_path)['model']
+    # fallback to huggingface if needed
+    if dataset is None:
+        logger.info("Falling back to huggingface dataset")
+        try:
+            _, _, _, meta_data = load_ibl_dataset(
+                cache_dir=config.dirs.dataset_cache_dir,
+                user_or_org_name=config.dirs.huggingface_org,
+                num_sessions=1,
+                split_method="predefined",
+                test_session_eid=[],
+                batch_size=config.training.train_batch_size,
+                seed=seed,
+                eid=eid,
+            )
+            dataset = load_dataset(f'ibl-foundation-model/{eid}_aligned',
+                                   cache_dir=config.dirs.dataset_cache_dir)["test"]
+        except Exception as ex:
+            raise RuntimeError(f"Unable to load dataset (local or hf): {ex}")
 
+    # ----- infer n_neurons -----
+    try:
+        n_neurons = len(dataset['cluster_regions'][0])
+    except Exception:
+        # fallback from metadata
+        n_neurons = meta_data.get("num_neurons")
+        if n_neurons is None:
+            # try to infer from spikes shape in first example
+            first = dataset[0]
+            spikes = first.get('spikes_data')
+            if spikes is not None:
+                if hasattr(spikes, 'shape'):
+                    n_neurons = spikes.shape[-1] if len(spikes.shape) > 2 else (spikes.shape[-1] if len(spikes.shape) > 1 else None)
+                elif isinstance(spikes, dict) and 'shape' in spikes:
+                    shape = spikes['shape']
+                    n_neurons = shape[-1] if len(shape) > 2 else (shape[-1] if len(shape) > 1 else None)
+        if n_neurons is None:
+            raise RuntimeError("Could not determine number of neurons from dataset or metadata")
+    logger.info(f"Number of neurons in dataset: {n_neurons}")
+
+    # Ensure num_neurons is in meta_data for model initialization
+    # NeuralStitcher expects num_neurons as a list (one value per session)
+    if "num_neurons" not in meta_data:
+        meta_data["num_neurons"] = [n_neurons]  # wrap in list for single session
+        logger.info(f"Added num_neurons to meta_data as list: {meta_data['num_neurons']}")
+    elif isinstance(meta_data["num_neurons"], int):
+        meta_data["num_neurons"] = [meta_data["num_neurons"]]
+        logger.info(f"Converted num_neurons to list: {meta_data['num_neurons']}")
+
+    # ----- build model -----
+    model_class = NAME2MODEL.get(config.model.model_class)
+    if model_class is None:
+        raise RuntimeError(f"Unknown model class: {config.model.model_class}")
+    model = model_class(config.model, **config.method.model_kwargs, **meta_data)
+
+    # ----- load checkpoint -----
+    if model_path is None:
+        raise RuntimeError("model_path must be provided")
+    if os.path.isdir(model_path):
+        # look for common checkpoint names
+        for cand in ("model_best.pt", "model.pt", "model.pth"):
+            cand_path = os.path.join(model_path, cand)
+            if os.path.exists(cand_path):
+                model_path = cand_path
+                break
+    logger.info(f"Loading checkpoint from {model_path}")
+    ckpt = torch.load(model_path, map_location="cpu")
+    # support multiple formats
+    if isinstance(ckpt, dict):
+        if "model" in ckpt:
+            loaded = ckpt["model"]
+            if hasattr(loaded, "state_dict"):
+                model = loaded
+            else:
+                model.load_state_dict(loaded, strict=False)
+        elif any(k.endswith("state_dict") for k in ckpt.keys()):
+            for k in ("state_dict", "model_state"):
+                if k in ckpt:
+                    model.load_state_dict(ckpt[k], strict=False)
+                    break
+        else:
+            # assume the dict values are state dicts (legacy)
+            model.load_state_dict(ckpt, strict=False)
+    else:
+        # checkpoint is the model object itself
+        model = ckpt
+
+    # ----- configure masker -----
     model.encoder.masker.mode = mask_mode
     model.encoder.masker.force_active = False
-
-    print("(eval) masking mode: ", model.encoder.masker.mode)
-    print("(eval) masking ratio: ", model.encoder.masker.ratio)
-    print("(eval) masking active: ", model.encoder.masker.force_active)
+    logger.info(f"(eval) masking mode: {model.encoder.masker.mode}")
+    logger.info(f"(eval) masking ratio: {getattr(model.encoder.masker, 'ratio', None)}")
+    logger.info(f"(eval) masking active: {model.encoder.masker.force_active}")
     if 'causal' in mask_name:
         model.encoder.context_forward = 0
-        print("(behave decoding) context forward: ", model.encoder.context_forward)
-    
+        logger.info(f"(behave decoding) context forward: {model.encoder.context_forward}")
+
     model = accelerator.prepare(model)
 
-    # load the dataset
-    dataset = load_dataset(f'ibl-foundation-model/{eid}_aligned', cache_dir=config.dirs.dataset_cache_dir)["test"]
-
-    n_neurons = len(dataset['cluster_regions'][0])
-
+    # ----- build dataloader -----
     if config.model.model_class in ["NDT1", "iTransformer"]:
-        max_space_length = n_neurons  
+        max_space_length = n_neurons
     elif config.model.model_class == "STPatch":
         max_space_length = config.model.encoder.embedder.n_neurons
     else:
         max_space_length = config.data.max_space_length
 
-    print('encoder max space length:', max_space_length)
+    logger.info(f'encoder max space length: {max_space_length}')
 
     dataloader = make_loader(
         dataset,
@@ -111,9 +221,9 @@ def load_model_data_local(**kwargs):
         shuffle=False,
     )
 
-    # check the shape of the dataset
+    # quick sanity check
     for batch in dataloader:
-        print('spike data shape: {}'.format(batch['spikes_data'].shape))
+        logger.info(f"spike data shape: {batch['spikes_data'].shape}")
         break
 
     return model, accelerator, dataset, dataloader
@@ -156,27 +266,35 @@ def co_smoothing_eval(
     N = uuids_list.shape[0]
 
     if is_aligned:
-        
+
         # prepare the condition matrix
         b_list = []
-    
-        # choice
+
+        # choice (always required)
         choice = np.array(test_dataset['choice'])
         choice = np.tile(np.reshape(choice, (choice.shape[0], 1)), (1, T))
         b_list.append(choice)
-    
-        # reward
-        reward = np.array(test_dataset['reward'])
+
+        # reward (optional - provide zeros if not in dataset)
+        if 'reward' in test_dataset.column_names:
+            reward = np.array(test_dataset['reward'])
+        else:
+            logger.warning("Column 'reward' not found in dataset, using zeros")
+            reward = np.zeros(len(test_dataset))
         reward = np.tile(np.reshape(reward, (reward.shape[0], 1)), (1, T))
         b_list.append(reward)
-    
-        # block
-        block = np.array(test_dataset['block'])
+
+        # block (optional - provide constant value if not in dataset)
+        if 'block' in test_dataset.column_names:
+            block = np.array(test_dataset['block'])
+        else:
+            logger.warning("Column 'block' not found in dataset, using 0.5 (uniform)")
+            block = np.full(len(test_dataset), 0.5)
         block = np.tile(np.reshape(block, (block.shape[0], 1)), (1, T))
         b_list.append(block)
-    
+
         behavior_set = np.stack(b_list, axis=-1)
-    
+
         var_name2idx = {'block': [2],
                         'choice': [0],
                         'reward': [1],

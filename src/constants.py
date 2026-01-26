@@ -38,6 +38,6 @@ MASK_MODE = [
     "temporal", "co_smooth", "intra-region", "inter-region"
 ]
 
-DISCRETE_BEHAVIOR = ["block", "choice"]
+DISCRETE_BEHAVIOR = ["block", "choice", "reward"]
 
 CONTINUOUS_BEHAVIOR = ["wheel", "left-whisker", "right-whisker"]
