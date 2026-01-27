@@ -144,6 +144,9 @@ def co_smoothing_eval(
     target_regions = kwargs['target_regions']
     n_jobs = kwargs['n_jobs']
 
+    # 保存 time_attn_mask 作为 valid_mask (1=有效, 0=padding)
+    time_attn_mask = batch['time_attn_mask'].detach().cpu().numpy()
+
     # hack to accommodate NDT2 - fix later 
     if sum(batch['space_attn_mask'][0] == 0) == 0:
         tot_num_neurons = batch['space_attn_mask'].size()[-1]
@@ -269,14 +272,16 @@ def co_smoothing_eval(
                                                               aligned_tbins=kwargs['onset_alignment'],
                                                               neuron_idx=uuids_list[n_i+i][:4],
                                                               neuron_region=region_list[n_i+i],
-                                                              method=method_name, save_path=kwargs['save_path'])
+                                                              method=method_name, save_path=kwargs['save_path'],
+                                                              valid_mask=time_attn_mask)
                         r2_result_list[n_i+i] = np.array([_r2_psth, _r2_trial])
                     else:
                         r2 = viz_single_cell_unaligned(
                             gt_held_out.squeeze(), pred_held_out.squeeze(), 
                             neuron_idx=uuids_list[n_i+i][:4],
                             neuron_region=region_list[n_i+i],
-                            method=method_name, save_path=kwargs['save_path']
+                            method=method_name, save_path=kwargs['save_path'],
+                            valid_mask=time_attn_mask
                         )
                         r2_result_list[n_i+i] = r2
                 else:
@@ -352,20 +357,25 @@ def co_smoothing_eval(
             for i in tqdm(range(idxs.shape[0]), desc='R2'):
                 if is_aligned:
                     X = behavior_set[:, target_time_idxs, :]  # [#trials, #timesteps, #variables]
+                    # 对于 forward_pred，只取目标时间步的 valid_mask
+                    valid_mask_fp = time_attn_mask[:, target_time_idxs]
                     _r2_psth, _r2_trial = viz_single_cell(X, ys[:, :, idxs[i]], y_preds[:, :, idxs[i]],
                                                           var_name2idx, var_tasklist, var_value2label, var_behlist,
                                                           subtract_psth=kwargs['subtract'],
                                                           aligned_tbins=[],
                                                           neuron_idx=uuids_list[idxs[i]][:4],
                                                           neuron_region=region_list[idxs[i]],
-                                                          method=method_name, save_path=kwargs['save_path']);
+                                                          method=method_name, save_path=kwargs['save_path'],
+                                                          valid_mask=valid_mask_fp);
                     r2_result_list[idxs[i]] = np.array([_r2_psth, _r2_trial])
                 else:
+                    valid_mask_fp = time_attn_mask[:, target_time_idxs]
                     r2 = viz_single_cell_unaligned(
                         ys[:, :, idxs[i]], y_preds[:, :, idxs[i]], 
                         neuron_idx=uuids_list[idxs[i]][:4],
                         neuron_region=region_list[idxs[i]],
-                        method=method_name, save_path=kwargs['save_path']
+                        method=method_name, save_path=kwargs['save_path'],
+                        valid_mask=valid_mask_fp
                     )
                     r2_result_list[idxs[i]] = r2
 
@@ -448,14 +458,16 @@ def co_smoothing_eval(
                                                           aligned_tbins=[],
                                                           neuron_idx=uuids_list[idxs[i]][:4],
                                                           neuron_region=region_list[idxs[i]],
-                                                          method=method_name, save_path=kwargs['save_path']);
+                                                          method=method_name, save_path=kwargs['save_path'],
+                                                          valid_mask=time_attn_mask);
                     r2_result_list[idxs[i]] = np.array([_r2_psth, _r2_trial])
                 else:
                     r2 = viz_single_cell_unaligned(
                         ys[:, :, idxs[i]], y_preds[:, :, idxs[i]], 
                         neuron_idx=uuids_list[idxs[i]][:4],
                         neuron_region=region_list[idxs[i]],
-                        method=method_name, save_path=kwargs['save_path']
+                        method=method_name, save_path=kwargs['save_path'],
+                        valid_mask=time_attn_mask
                     )
                     r2_result_list[idxs[i]] = r2
                         
@@ -549,14 +561,16 @@ def co_smoothing_eval(
                                                               aligned_tbins=[],
                                                               neuron_idx=uuids_list[heldout_idxs[i]][:4],
                                                               neuron_region=region_list[heldout_idxs[i]],
-                                                              method=method_name, save_path=kwargs['save_path']);
+                                                              method=method_name, save_path=kwargs['save_path'],
+                                                              valid_mask=time_attn_mask);
                         r2_result_list[heldout_idxs[i]] = np.array([_r2_psth, _r2_trial])
                     else:
                         r2 = viz_single_cell_unaligned(
                             gt_held_out.squeeze(), pred_held_out.squeeze(),
                             neuron_idx=uuids_list[heldout_idxs[i]][:4],
                             neuron_region=region_list[heldout_idxs[i]],
-                            method=method_name, save_path=kwargs['save_path']
+                            method=method_name, save_path=kwargs['save_path'],
+                            valid_mask=time_attn_mask
                         )
                         r2_result_list[heldout_idxs[i]] = r2
     else:
@@ -1207,7 +1221,7 @@ def bits_per_spike(rates, spikes):
 
 def plot_psth(X, y, y_pred, var_tasklist, var_name2idx, var_value2label,
               aligned_tbins=[],
-              axes=None, legend=False, neuron_idx='', neuron_region='', save_plot=False):
+              axes=None, legend=False, neuron_idx='', neuron_region='', save_plot=False, valid_mask=None):
     
     if save_plot:
         if axes is None:
@@ -1244,7 +1258,8 @@ def plot_psth(X, y, y_pred, var_tasklist, var_name2idx, var_value2label,
     psth_xy = compute_all_psth(X, y, idxs_psth)
     psth_pred_xy = compute_all_psth(X, y_pred, idxs_psth)
     r2_psth = compute_R2_psth(psth_xy, psth_pred_xy, clip=False)
-    r2_single_trial = compute_R2_main(y.reshape(-1, 1), y_pred.reshape(-1, 1), clip=False)[0]
+    # 使用 valid_mask 排除 padding 区域计算 R²
+    r2_single_trial = compute_R2_main(y.reshape(-1, 1), y_pred.reshape(-1, 1), valid_mask=valid_mask, clip=False)[0]
     
     if save_plot:
         axes[0].set_ylabel(
@@ -1406,7 +1421,7 @@ This script generates a plot to examine the (single-trial) fitting of a single n
 
 def viz_single_cell(X, y, y_pred, var_name2idx, var_tasklist, var_value2label, var_behlist,
                     subtract_psth="task", aligned_tbins=[], clusby='y_pred', neuron_idx='', neuron_region='', method='',
-                    save_path='figs', save_plot=False):
+                    save_path='figs', save_plot=False, valid_mask=None):
     
     if save_plot:
         nrows = 8
@@ -1425,7 +1440,7 @@ def viz_single_cell(X, y, y_pred, var_name2idx, var_tasklist, var_value2label, v
                                   var_value2label=var_value2label,
                                   aligned_tbins=aligned_tbins,
                                   axes=axes_psth, legend=True, neuron_idx=neuron_idx, neuron_region=neuron_region,
-                                  save_plot=save_plot)
+                                  save_plot=save_plot, valid_mask=valid_mask)
 
     ### plot the psth-subtracted activity
     if save_plot:
@@ -1449,16 +1464,20 @@ def viz_single_cell(X, y, y_pred, var_name2idx, var_tasklist, var_value2label, v
 
 def viz_single_cell_unaligned(
     gt, pred, neuron_idx, neuron_region, method, save_path, 
-    n_clus=8, n_neighbors=5, save_plot=False
+    n_clus=8, n_neighbors=5, save_plot=False, valid_mask=None
 ):
     
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
-    r2 = 0
-    for _ in range(len(gt)):
-        r2 += r2_score(gt, pred)
-    r2 /= len(gt)
+    # 使用 valid_mask 排除 padding 区域计算 R²
+    if valid_mask is not None:
+        valid_mask_flat = valid_mask.reshape(-1)
+        gt_valid = gt.reshape(-1)[valid_mask_flat]
+        pred_valid = pred.reshape(-1)[valid_mask_flat]
+        r2 = r2_score(gt_valid, pred_valid)
+    else:
+        r2 = r2_score(gt.flatten(), pred.flatten())
 
     if save_plot:
         y = gt - gt.mean(0)
@@ -1595,17 +1614,39 @@ def compute_R2_psth(psth_xy, psth_pred_xy, clip=True):
     return r2s
 
 
-def compute_R2_main(y, y_pred, clip=True):
+def compute_R2_main(y, y_pred, valid_mask=None, clip=True):
     """
     :y: (K, T, N) or (K*T, N)
     :y_pred: (K, T, N) or (K*T, N)
+    :valid_mask: (K, T) boolean mask, True for valid data, False for padding
     """
     N = y.shape[-1]
     if len(y.shape) > 2:
-        y = y.reshape((-1, N))
+        y_flat = y.reshape((-1, N))
+    else:
+        y_flat = y
     if len(y_pred.shape) > 2:
-        y_pred = y_pred.reshape((-1, N))
-    r2s = np.asarray([r2_score(y[:, n].flatten(), y_pred[:, n].flatten()) for n in range(N)])
+        y_pred_flat = y_pred.reshape((-1, N))
+    else:
+        y_pred_flat = y_pred
+    
+    if valid_mask is not None:
+        # Expand valid_mask to match neuron dimension if needed
+        if len(valid_mask.shape) == 2:
+            valid_mask_flat = valid_mask.reshape(-1)  # (K*T,)
+        else:
+            valid_mask_flat = valid_mask.reshape(-1)
+        
+        r2s = []
+        for n in range(N):
+            y_n = y_flat[:, n][valid_mask_flat]
+            y_pred_n = y_pred_flat[:, n][valid_mask_flat]
+            r2_n = r2_score(y_n, y_pred_n)
+            r2s.append(r2_n)
+        r2s = np.asarray(r2s)
+    else:
+        r2s = np.asarray([r2_score(y_flat[:, n].flatten(), y_pred_flat[:, n].flatten()) for n in range(N)])
+    
     if clip:
         return np.clip(r2s, 0., 1.)
     else:

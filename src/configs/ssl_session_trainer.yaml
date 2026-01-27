@@ -11,7 +11,7 @@ wandb:
   use: true
   entity: null
   project: single-session
-  run_name: 671c7ea7
+  run_name: 4b00df29-427ch
 
 # Logging directories
 dirs:
@@ -30,13 +30,13 @@ dirs:
 
 # Training configuration
 training:
-  num_epochs: 500
+  num_epochs: 1000   # 增加训练轮数
   train_batch_size: 32
   test_batch_size: 32  
   shuffle_test_dataloader: false    # Shuffle test dataloader between epochs
 
   save_plot_every_n_epochs: 50  # Plot the model output every n epochs
-  save_every: 50  # Save checkpoint
+  save_every: 100  # Save checkpoint (增加到 100)
   eval_every: 50  # Eval model
 
   finetune: false
@@ -120,10 +120,10 @@ method:
 
 optimizer:
   gradient_accumulation_steps: 1
-  lr: 1.e-3
+  lr: 5.e-4   # 降低学习率 0.0005
   wd: 0.01
   eps: 1.e-8
-  warmup_pct: 0.15 # cosine/linear
+  warmup_pct: 0.1  # 减少 warmup 比例
   gamma: 0.95     # step
   div_factor: 10  # cosine
   scheduler: cosine # step/cosine/linear
