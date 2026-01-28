@@ -331,7 +331,9 @@ def main():
     model = model_class(config.model, **config.method.model_kwargs, **meta_data)
     model = torch.load(args.model_path)['model']
 
-    # 设置 masker
+    # 设置 masker - 注意：force_active=False，所以内部masker不会生效
+    # 评估时使用外部heldout_mask来控制masking
+    # mask_mode 仅用于记录日志，实际masking由 heldout_mask 函数控制
     mask_mode = args.mask_name.split("_")[1] if "_" in args.mask_name else "all"
     model.encoder.masker.mode = mask_mode
     model.encoder.masker.force_active = False

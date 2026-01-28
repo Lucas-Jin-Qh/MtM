@@ -393,8 +393,7 @@ def co_smoothing_eval(
             print(region)
             hd = np.argwhere(region_list==region).flatten() 
             held_out_list = np.arange(len(hd))
-            held_out_list = [held_out_list]   
-            hd = np.array([held_out_list]).flatten()
+            hd = np.array(held_out_list)  # 直接使用索引 [0, 1, 2, ..., len(hd)-1]
 
             model.eval()
             with torch.no_grad():
@@ -1194,14 +1193,18 @@ def bits_per_spike(rates, spikes):
     float
         Bits per spike of rate predictions
     """
+    total_spikes = np.nansum(spikes)
+    # Handle case where there are no spikes (avoid divide by zero warning)
+    if total_spikes <= 0:
+        return np.nan
+    
     nll_model = neg_log_likelihood(rates, spikes)
     null_rates = np.tile(
         np.nanmean(spikes, axis=tuple(range(spikes.ndim - 1)), keepdims=True),
         spikes.shape[:-1] + (1,),
     )
     nll_null = neg_log_likelihood(null_rates, spikes, zero_warning=False)
-    # print(np.nansum(spikes))
-    return (nll_null - nll_model) / np.nansum(spikes) / np.log(2)
+    return (nll_null - nll_model) / total_spikes / np.log(2)
 
 
 # --------------------------------------------------------------------------------------------------

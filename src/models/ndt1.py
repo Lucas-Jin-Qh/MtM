@@ -497,7 +497,10 @@ class NeuralEncoder(nn.Module):
             targets_mask = torch.zeros_like(spikes).to(torch.int64).to(spikes.device)
 
         if eval_mask is not None:
-            targets_mask = eval_mask.clone()
+            # eval_mask from heldout_mask: 1 = positions to evaluate (masked out), 0 = positions to keep
+            # Directly use eval_mask as targets_mask for correct evaluation
+            # Note: targets_mask = 1 means "this position should be evaluated"
+            targets_mask = eval_mask
         
         # stitcher
         if hasattr(self, 'stitcher'):

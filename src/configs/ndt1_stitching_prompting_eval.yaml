@@ -10,10 +10,10 @@ encoder:
   # Mask spikes
   masker:
     force_active: false         # 评估时使用 heldout_mask，不使用 encoder 内置 masker
-    mode: all      # masking mode
-    ratio: 0.3          # ratio of data to predict (与训练配置一致)
-    zero_ratio: 1.0     # of the data to predict, ratio of zeroed out
-    random_ratio: 1.0   # of the not zeroed, ratio of randomly replaced
+    mode: all                   # masking mode
+    ratio: 0.3                  # ratio of data to predict (与训练配置 ndt1_stitching_prompting.yaml 一致)
+    zero_ratio: 0.5             # of the data to predict, ratio of zeroed out (与训练配置一致)
+    random_ratio: 0.5           # of the not zeroed, ratio of randomly replaced (与训练配置一致)
     expand_prob: 0.0    # probability of expanding the mask in ``temporal`` mode
     max_timespan: 1     # max span of mask if expanded
     channels: null
