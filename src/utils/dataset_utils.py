@@ -5,6 +5,9 @@ import h5py
 import os
 import torch
 from tqdm import tqdm
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DATASET_MODES:
     train = "train"
@@ -53,17 +56,17 @@ def get_test_re_eids():
 def get_sparse_from_binned_spikes(binned_spikes):
     sparse_binned_spikes = [csr_array(binned_spikes[i], dtype=np.ubyte) for i in range(binned_spikes.shape[0])]
 
-    spikes_sparse_data_list = [csr_matrix.data.tolist() for csr_matrix in sparse_binned_spikes] 
-    spikes_sparse_indices_list = [csr_matrix.indices.tolist() for csr_matrix in sparse_binned_spikes]
-    spikes_sparse_indptr_list = [csr_matrix.indptr.tolist() for csr_matrix in sparse_binned_spikes]
-    spikes_sparse_shape_list = [csr_matrix.shape for csr_matrix in sparse_binned_spikes]
+    spikes_sparse_data_list = [s.data.tolist() for s in sparse_binned_spikes]
+    spikes_sparse_indices_list = [s.indices.tolist() for s in sparse_binned_spikes]
+    spikes_sparse_indptr_list = [s.indptr.tolist() for s in sparse_binned_spikes]
+    spikes_sparse_shape_list = [s.shape for s in sparse_binned_spikes]
 
     return sparse_binned_spikes, spikes_sparse_data_list, spikes_sparse_indices_list, spikes_sparse_indptr_list, spikes_sparse_shape_list
 
 def get_binned_spikes_from_sparse(spikes_sparse_data_list, spikes_sparse_indices_list, spikes_sparse_indptr_list, spikes_sparse_shape_list):
     sparse_binned_spikes = [csr_array((spikes_sparse_data_list[i], spikes_sparse_indices_list[i], spikes_sparse_indptr_list[i]), shape=spikes_sparse_shape_list[i]) for i in range(len(spikes_sparse_data_list))]
 
-    binned_spikes = np.array([csr_matrix.toarray() for csr_matrix in sparse_binned_spikes])
+    binned_spikes = np.array([s.toarray() for s in sparse_binned_spikes])
 
     return binned_spikes
 
@@ -145,14 +148,14 @@ def get_data_from_h5(mode, filepath, config):
             if f'eval_{NLB_KEY}_heldout' in h5dict:
                 valid_data_heldout = get_key(f'eval_{NLB_KEY}_heldout')
             else:
-                self.logger.warn('Substituting zero array for heldout neurons. Only done for evaluating models locally, i.e. will disrupt training due to early stopping.')
+                logger.warning('Substituting zero array for heldout neurons. Only done for evaluating models locally, i.e. will disrupt training due to early stopping.')
                 valid_data_heldout = np.zeros((valid_data.shape[0], valid_data.shape[1], train_data_heldout.shape[2]), dtype=np.float32)
             if f'eval_{NLB_KEY}_heldin_forward' in h5dict:
                 valid_data_fp = get_key(f'eval_{NLB_KEY}_heldin_forward')
                 valid_data_heldout_fp = get_key(f'eval_{NLB_KEY}_heldout_forward')
                 valid_data_all_fp = np.concatenate([valid_data_fp, valid_data_heldout_fp], -1)
             else:
-                self.logger.warn('Substituting zero array for heldout forward neurons. Only done for evaluating models locally, i.e. will disrupt training due to early stopping.')
+                logger.warning('Substituting zero array for heldout forward neurons. Only done for evaluating models locally, i.e. will disrupt training due to early stopping.')
                 valid_data_all_fp = np.zeros(
                     (valid_data.shape[0], train_data_fp.shape[1], valid_data.shape[2] + valid_data_heldout.shape[2]), dtype=np.float32
                 )
@@ -210,8 +213,44 @@ def load_ibl_dataset(cache_dir,
             _dataset = dataset.train_test_split(test_size=0.2, seed=seed)
             _dataset_train, _dataset_test = _dataset["train"], _dataset["test"]
             dataset = _dataset_train.train_test_split(test_size=0.1, seed=seed)
-            return dataset["train"], dataset["test"], _dataset_test
-        return dataset["train"], dataset["val"], dataset["test"]
+            # derive minimal meta_data for single-session dataset
+            try:
+                binned_spikes_data = get_binned_spikes_from_sparse(
+                    [dataset["train"]["spikes_sparse_data"][0]],
+                    [dataset["train"]["spikes_sparse_indices"][0]],
+                    [dataset["train"]["spikes_sparse_indptr"][0]],
+                    [dataset["train"]["spikes_sparse_shape"][0]],
+                )
+                num_neurons = [int(binned_spikes_data.shape[2])]
+            except Exception:
+                num_neurons = []
+            eids_set = set()
+            try:
+                if "eid" in dataset["train"].column_names:
+                    eids_set.add(dataset["train"]["eid"][0])
+            except Exception:
+                pass
+            meta_data_local = {"num_neurons": num_neurons, "num_sessions": len(eids_set), "eids": eids_set}
+            return dataset["train"], dataset["test"], _dataset_test, meta_data_local
+        # derive meta_data for multi-split dataset
+        try:
+            binned_spikes_data = get_binned_spikes_from_sparse(
+                [dataset["train"]["spikes_sparse_data"][0]],
+                [dataset["train"]["spikes_sparse_indices"][0]],
+                [dataset["train"]["spikes_sparse_indptr"][0]],
+                [dataset["train"]["spikes_sparse_shape"][0]],
+            )
+            num_neurons = [int(binned_spikes_data.shape[2])]
+        except Exception:
+            num_neurons = []
+        eids_set = set()
+        try:
+            if "eid" in dataset["train"].column_names:
+                eids_set.add(dataset["train"]["eid"][0])
+        except Exception:
+            pass
+        meta_data_local = {"num_neurons": num_neurons, "num_sessions": len(eids_set), "eids": eids_set}
+        return dataset["train"], dataset["val"], dataset["test"], meta_data_local
     
     user_datasets = get_user_datasets(user_or_org_name)
     print("Total session-wise datasets found: ", len(user_datasets))
@@ -257,7 +296,25 @@ def load_ibl_dataset(cache_dir,
             all_sessions_datasets.append(session_dataset)
         all_sessions_datasets = concatenate_datasets(all_sessions_datasets)
         test_dataset = all_sessions_datasets.select_columns(DATA_COLUMNS)
-        return None, test_dataset
+        # derive meta for eval-only load
+        try:
+            binned_spikes_data = get_binned_spikes_from_sparse(
+                [test_dataset["spikes_sparse_data"][0]],
+                [test_dataset["spikes_sparse_indices"][0]],
+                [test_dataset["spikes_sparse_indptr"][0]],
+                [test_dataset["spikes_sparse_shape"][0]],
+            )
+            num_neurons = [int(binned_spikes_data.shape[2])]
+        except Exception:
+            num_neurons = []
+        eids_set = set()
+        try:
+            if "eid" in test_dataset.column_names:
+                eids_set.add(test_dataset["eid"][0])
+        except Exception:
+            pass
+        meta_data_local = {"num_neurons": num_neurons, "num_sessions": len(eids_set), "eids": eids_set}
+        return None, None, test_dataset, meta_data_local
     
     if split_method == 'random_split':
         print("Loading datasets...")
@@ -344,6 +401,45 @@ def load_ibl_dataset(cache_dir,
     else:
         raise ValueError("Invalid split method. Please choose either 'random_split' or 'session_based'")
     
+    # Ensure val_dataset exists for branches that didn't define it
+    try:
+        val_dataset
+    except NameError:
+        val_dataset = None
+
+    # If meta_data wasn't built in earlier branches, try to derive minimal metadata
+    if "meta_data" not in locals():
+        num_neuron_set = set()
+        eids_set = set()
+
+        def _try_add_from_ds(ds):
+            try:
+                if ds is None:
+                    return
+                if "spikes_sparse_data" in ds.column_names:
+                    ssd = ds["spikes_sparse_data"][0]
+                    ssi = ds["spikes_sparse_indices"][0]
+                    ssip = ds["spikes_sparse_indptr"][0]
+                    ssshape = ds["spikes_sparse_shape"][0]
+                    binned_spikes_data = get_binned_spikes_from_sparse(
+                        [ssd], [ssi], [ssip], [ssshape]
+                    )
+                    num_neuron_set.add(int(binned_spikes_data.shape[2]))
+                if "eid" in ds.column_names:
+                    eids_set.add(ds["eid"][0])
+            except Exception:
+                pass
+
+        _try_add_from_ds(locals().get("train_dataset", None))
+        _try_add_from_ds(locals().get("val_dataset", None))
+        _try_add_from_ds(locals().get("test_dataset", None))
+
+        meta_data = {
+            "num_neurons": list(num_neuron_set),
+            "num_sessions": len(eids_set),
+            "eids": eids_set,
+        }
+
     return train_dataset, val_dataset, test_dataset, meta_data
 
 def _time_extract(data):

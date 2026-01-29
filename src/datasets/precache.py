@@ -53,7 +53,7 @@ def load_params(params_arg: str | None) -> dict:
         "time_window": (-0.2, 0.8),
         "behavior_keys": DISCRETE_BEHAVIOR + CONTINUOUS_BEHAVIOR,
         "fr_threshold": 1.0,  # 1 Hz
-        "smoothing_sigma": 1.0, # 3 bins ~ 0.05s
+        "smoothing_sigma": 0.5, # 0.5 bins ~ 0.0167s
     }
     if params_arg is None:
         return default_params
@@ -277,6 +277,11 @@ def main(args):
             "interval_len": params.get("interval_len"),
             "dataset_revisions": meta_dict.get("dataset_revisions", None),
         }
+        # Persist number of neurons for downstream model initialization (NDT1 expects list for single-session)
+        try:
+            meta_to_save["num_neurons"] = [int(binned_spikes.shape[2])]
+        except Exception:
+            meta_to_save["num_neurons"] = []
         with open(meta_out, "w") as fh:
             json.dump(meta_to_save, fh, indent=2)
 

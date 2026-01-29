@@ -52,7 +52,7 @@ encoder:
     act: softsign         # activation for the embedding layers
     scale: 1              # scale the embedding multiplying by this number
     bias: true            # use bias in the embedding layer
-    dropout: 0.2          # dropout in embedding layer
+    dropout: 0.1          # dropout in embedding layer
     
     fixup_init: false     # modify weight initialization
     init_range: 0.1       # initialization range for embeddings
@@ -85,7 +85,7 @@ encoder:
     inter_size: 1024      # intermediate dimension in the mlp layers
     mlp_bias: true        # learn bias in the mlp layers
     
-    dropout: 0.4          # dropout in transformer layers
+    dropout: 0.2          # dropout in transformer layers
     fixup_init: true      # modify weight initialization
 
   # Projection to factor space

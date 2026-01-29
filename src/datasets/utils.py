@@ -45,9 +45,15 @@ def load_spiking_data(
     *,
     eid: str = "",
     pname: str = "",
-) -> Tuple[Optional[Dict[str, np.ndarray]], Optional[pd.DataFrame]]:
+) -> Tuple[Optional[Dict[str, np.ndarray]], Optional[pd.DataFrame], float]:
         
     spike_loader = SpikeSortingLoader(pid=pid, one=one, eid=eid, pname=pname)
+    # Try to get sampling frequency from raw electrophysiology (AP band)
+    try:
+        sampling_freq = spike_loader.raw_electrophysiology(band="ap", stream=True).fs
+        sampling_freq = float(sampling_freq) if sampling_freq is not None else 30000.0
+    except Exception:
+        sampling_freq = 30000.0
 
     spikes, clusters, channels = spike_loader.load_spike_sorting()
     clusters_labeled = SpikeSortingLoader.merge_clusters(
@@ -55,11 +61,11 @@ def load_spiking_data(
     )
 
     if clusters_labeled is None:
-        return None, None
+        return None, None, sampling_freq
     clusters_labeled_df = clusters_labeled.to_df()
 
     if qc is None:
-        return spikes, clusters_labeled_df
+        return spikes, clusters_labeled_df, sampling_freq
 
     iok = clusters_labeled_df["label"] >= qc
     selected_clusters = clusters_labeled_df[iok]
@@ -67,7 +73,7 @@ def load_spiking_data(
     selected_clusters.reset_index(drop=True, inplace=True)
     selected_spikes = {k: v[spike_idx] for k, v in spikes.items()}
     selected_spikes["clusters"] = selected_clusters.index.to_numpy()[ib].astype(np.int32)
-    return selected_spikes, selected_clusters
+    return selected_spikes, selected_clusters, sampling_freq
 
 
 def merge_probes(
@@ -339,12 +345,15 @@ def prepare_data(
     clusters_list: List[pd.DataFrame] = []
     spikes_list: List[Dict[str, np.ndarray]] = []
 
+    sampling_freq = None
     for pid, probe_name in zip(pids, probe_names):
-        tmp_spikes, tmp_clusters = load_spiking_data(
+        tmp_spikes, tmp_clusters, tmp_sampling_freq = load_spiking_data(
             one, pid, eid=eid, pname=probe_name
         )
         if tmp_spikes is None or tmp_clusters is None:
-            return None, None, None, None, None
+            return None, None, None, None
+        if sampling_freq is None:
+            sampling_freq = tmp_sampling_freq
         tmp_clusters["pid"] = pid
         spikes_list.append(tmp_spikes)
         clusters_list.append(tmp_clusters)
@@ -376,6 +385,9 @@ def prepare_data(
         "cluster_channels": list(clusters["channels"]),
         "cluster_regions": list(cluster_regions),
         "uuids": list(clusters["uuids"]),
+        "cluster_depths": list(clusters["depths"]) if "depths" in clusters.columns else [],
+        "good_clusters": list((clusters["label"] >= 1).astype(int)) if "label" in clusters.columns else [],
+        "sampling_freq": float(sampling_freq) if sampling_freq is not None else 30000.0,
     }
 
     behavior_data = load_behavior_data(
