@@ -300,13 +300,17 @@ def co_smoothing_eval(
                         }
 
         # Use original IBL encoding (choice: -1/1, block: 0.2/0.5/0.8, reward: 0/1)
-        var_value2label = {'block': {(0.2,): "p(left)=0.2",
-                                     (0.5,): "p(left)=0.5",
-                                     (0.8,): "p(left)=0.8", },
-                           'choice': {(-1.0,): "right",
-                                      (1.0,): "left"},
-                           'reward': {(0.,): "no reward",
-                                      (1.,): "reward", }}
+        # Use custom var_value2label if provided in kwargs, otherwise use default
+        if 'var_value2label' in kwargs:
+            var_value2label = kwargs['var_value2label']
+        else:
+            var_value2label = {'block': {(0.2,): "p(left)=0.2",
+                                         (0.5,): "p(left)=0.5",
+                                         (0.8,): "p(left)=0.8", },
+                               'choice': {(-1.0,): "right",
+                                          (1.0,): "left"},
+                               'reward': {(0.,): "no reward",
+                                          (1.,): "reward", }}
 
         var_tasklist = ['block', 'choice', 'reward']
         var_behlist = []
@@ -1585,8 +1589,9 @@ def viz_single_cell(X, y, y_pred, var_name2idx, var_tasklist, var_value2label, v
         os.makedirs(save_path)
     
     if save_plot:
-        plt.savefig(os.path.join(save_path, f"{neuron_region.replace('/', '-')}_{neuron_idx}_{r2_trial:.2f}_{method}.png"))
-        plt.tight_layout();
+        plt.tight_layout(h_pad=0.3, w_pad=0.3)  # Adjust layout first
+        plt.savefig(os.path.join(save_path, f"{neuron_region.replace('/', '-')}_{neuron_idx}_{r2_trial:.2f}_{method}.png"),
+                    bbox_inches='tight', pad_inches=0.02)  # Remove margin whitespace
 
     return r2_psth, r2_trial
     
@@ -1651,8 +1656,9 @@ def viz_single_cell_unaligned(
             ax.xaxis.set_ticklabels([])
             ax.spines[['left','bottom', 'right', 'top']].set_visible(False)
         
-        plt.savefig(os.path.join(save_path, f"{neuron_region.replace('/', '-')}_{neuron_idx}_{r2:.2f}_{method}.png"))
         plt.tight_layout()
+        plt.savefig(os.path.join(save_path, f"{neuron_region.replace('/', '-')}_{neuron_idx}_{r2:.2f}_{method}.png"),
+                    bbox_inches='tight', pad_inches=0.02)
 
     return r2
 

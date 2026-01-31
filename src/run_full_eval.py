@@ -186,23 +186,23 @@ def run_evaluation():
             n=1,
             method_name="MtM_SingleSession",
             mode=task_cfg["mode"],
-            is_aligned=True,  # IBL 数据是对齐的
+            is_aligned=True,  # IBL data is aligned
             target_regions=task_cfg.get("target_regions"),
             held_out_list=task_cfg.get("held_out_list"),
             n_jobs=N_JOBS,
             subtract=SUBTRACT_PSTH,
-            onset_alignment=[ALIGNMENT_BIN],  # 关键：对齐到 stimulus onset
+            onset_alignment=[ALIGNMENT_BIN],  # Key: align to stimulus onset
             n_time_steps=TRIAL_LEN,
             save_path=task_save_path
         )
         
-        # 加载保存的 BPS 数据
+        # Load saved BPS data
         bps_path = os.path.join(task_save_path, "bps.npy")
         if os.path.exists(bps_path):
             bps = np.load(bps_path)
             all_bps[task_name] = bps
             
-            # 计算统计量
+            # Calculate statistics
             mean_bps = np.nanmean(bps)
             std_bps = np.nanstd(bps)
             n_valid = np.sum(~np.isnan(bps))
@@ -219,17 +219,17 @@ def run_evaluation():
         else:
             logger.warning(f"BPS file not found: {bps_path}")
     
-    # 3. 生成 BPS 汇总图
+    # 3. Generate BPS summary plot
     if all_bps:
         summary_plot_path = os.path.join(SAVE_DIR, "bps_summary_all_tasks.png")
         plot_bps_summary_all_tasks(all_bps, summary_plot_path)
     
-    # 4. 保存汇总表格
+    # 4. Save summary table
     df = pd.DataFrame(summary_metrics).T
     summary_csv_path = os.path.join(SAVE_DIR, "bps_summary.csv")
     df.to_csv(summary_csv_path)
     
-    # 5. 生成简洁报告
+    # 5. Generate concise report
     report = []
     report.append("=" * 60)
     report.append("MtM Single-Session Evaluation Summary")
