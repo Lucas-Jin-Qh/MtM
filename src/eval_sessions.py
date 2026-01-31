@@ -284,6 +284,9 @@ def main():
         "eid": args.eid,
         "mask_name": args.mask_name,
         "seed": args.seed,
+        "test_size": 0.1,  # 单会话训练不使用
+        "stitching": False,  # 单会话模型不拼接
+        "num_sessions": 1,
     }
 
     logger.info("=" * 60)

@@ -288,6 +288,7 @@ def load_behavior_data(
     eid: str,
     trials_df: pd.DataFrame,
     behavior_keys: Optional[List[str]] = None,
+    use_raw_encoding: bool = True,  # If True, use original IBL encoding
 ) -> Dict[str, np.ndarray]:
     if behavior_keys is None:
         behavior_keys = DISCRETE_BEHAVIOR + CONTINUOUS_BEHAVIOR
@@ -299,6 +300,7 @@ def load_behavior_data(
         if key in trials_df.columns:
             behavior_data[key] = trials_df[key].to_numpy()
         elif key == "block":
+            # Use original probabilityLeft values for block (0.2, 0.5, 0.8)
             behavior_data[key] = trials_df["probabilityLeft"].to_numpy()
         elif key == "reward":
             behavior_data[key] = (trials_df["rewardVolume"] > 1).astype(int).to_numpy()
@@ -323,10 +325,8 @@ def load_behavior_data(
         else:
             raise ValueError(f"Unknown behavior key: {key}")
 
-    for key in behavior_keys:
-        if key in DISCRETE_BEHAVIOR:
-            unique_values, inverse_indices = np.unique(behavior_data[key], return_inverse=True)
-            behavior_data[key] = inverse_indices.astype(np.int64)
+    # Use original IBL encoding (choice: -1/1, block: 0.2/0.5/0.8)
+    # Integer encoding conversion has been removed
 
     return behavior_data
 
@@ -393,6 +393,7 @@ def prepare_data(
     behavior_data = load_behavior_data(
         one, eid, trials_df,
         behavior_keys=params.get("behavior_keys", None),
+        use_raw_encoding=params.get("use_raw_encoding", True),
     )
 
     return neural_dict, meta_data, trials_data, behavior_data

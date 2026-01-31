@@ -1,10 +1,10 @@
 """
-MtM Single-Session 完整评估脚本
-参考: Neural Encoding and Decoding at Scale Fig.2
+MtM Single-Session Complete Evaluation Script
+Reference: Neural Encoding and Decoding at Scale Fig.2
 
-功能:
-- 运行 4 种评估任务 (co-smooth, temporal, inter-region, intra-region)
-- 生成 BPS 指标和单神经元可视化 (PSTH + Single-trial Raster)
+Functionality:
+- Run 4 evaluation tasks (co-smooth, temporal, inter-region, intra-region)
+- Generate BPS metrics and single-neuron visualizations (PSTH + Single-trial Raster)
 """
 
 import torch
@@ -15,42 +15,42 @@ from pathlib import Path
 import pandas as pd
 import logging
 
-# 配置日志
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# 引入项目中的工具
+# Import project utilities
 from utils.eval_utils import load_model_data_local, co_smoothing_eval
 from utils.utils import set_seed
 
-# ================= 配置区域 =================
-# Session 配置
+# ================= Configuration =================
+# Session Configuration
 EID = "4b00df29-3769-43be-bb40-128b1cba6d35"
 
-# 基础路径
+# Base path
 BASE_DIR = "/home/jqh/Workspace/IBL foundation model/MtM"
 
-# 模型路径
+# Model path
 MODEL_PATH = f"{BASE_DIR}/results/train/num_session_1/model_NDT1/method_ssl/mask_all/stitch_True/model_best.pt"
 
-# 输出目录
+# Output directory
 SAVE_DIR = f"{BASE_DIR}/results/eval_figures"
 
-# 数据集路径
+# Dataset path
 DATASET_PATH = f"{BASE_DIR}/data/4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
 
-# 配置路径
+# Config paths
 MODEL_CONFIG = f"{BASE_DIR}/src/configs/ndt1.yaml"
 TRAINER_CONFIG = f"{BASE_DIR}/src/configs/ssl_session_trainer.yaml"
 
-# 数据参数
+# Data parameters
 BIN_SIZE = 0.0167  # seconds (60 Hz)
 TIME_WINDOW = (-0.2, 0.8)  # seconds
 ALIGNMENT_BIN = int(abs(TIME_WINDOW[0]) / BIN_SIZE)  # 0.2s / 0.0167s = 12
 TRIAL_LEN = 60  # 1.0s / 0.0167s = 60 bins
 
-# 定义要评估的四个任务
-# mode 对应 eval_utils.py 中的 co_smoothing_eval mode
+# Define four evaluation tasks
+# mode corresponds to co_smoothing_eval mode in eval_utils.py
 TASKS = {
     "co_smooth": {
         "mode": "per_neuron",
@@ -60,7 +60,7 @@ TASKS = {
     },
     "temporal": {
         "mode": "forward_pred",
-        "held_out_list": [ALIGNMENT_BIN + 2],  # 预测刺激后第2个时间步 (causal prediction)
+        "held_out_list": [ALIGNMENT_BIN + 2],  # Predict 2nd time bin after stimulus onset (causal prediction)
         "target_regions": None,
         "description": "Temporal prediction (causal, forward prediction)"
     },
@@ -78,18 +78,18 @@ TASKS = {
     }
 }
 
-# 评估参数
-N_JOBS = 1  # 并行神经元数，调试时用1，生产环境可调大
+# Evaluation parameters
+N_JOBS = 1  # Number of parallel neurons, use 1 for debugging, increase for production
 SUBTRACT_PSTH = "task"  # "task" | "global" | None
 # ===========================================
 
 def plot_bps_summary_all_tasks(bps_dict, save_path):
     """
-    绘制所有任务的 BPS 汇总图
+    Plot BPS summary for all tasks.
     
     Args:
         bps_dict: dict, {task_name: bps_array}
-        save_path: str, 保存路径
+        save_path: str, save path
     """
     n_tasks = len(bps_dict)
     fig, axes = plt.subplots(2, n_tasks, figsize=(5 * n_tasks, 10))
@@ -98,10 +98,10 @@ def plot_bps_summary_all_tasks(bps_dict, save_path):
         axes = axes.reshape(2, 1)
     
     for idx, (task_name, bps) in enumerate(bps_dict.items()):
-        # 过滤 NaN
+        # Filter NaN
         bps_valid = bps[~np.isnan(bps)]
         
-        # 上方: BPS 直方图
+        # Top: BPS histogram
         axes[0, idx].hist(bps_valid, bins=30, alpha=0.7, color='steelblue', edgecolor='black')
         mean_bps = np.nanmean(bps)
         axes[0, idx].axvline(mean_bps, color='r', linestyle='--', linewidth=2,
@@ -111,7 +111,7 @@ def plot_bps_summary_all_tasks(bps_dict, save_path):
         axes[0, idx].set_title(f'{task_name}\n(n={len(bps_valid)}, mean={mean_bps:.3f})')
         axes[0, idx].legend()
         
-        # 下方: 按神经元排序的 BPS
+        # Bottom: BPS sorted by neuron
         sorted_idx = np.argsort(bps)[::-1]
         x = np.arange(len(bps))
         axes[1, idx].scatter(x, bps[sorted_idx], s=1, alpha=0.5, c='steelblue')
@@ -127,21 +127,21 @@ def plot_bps_summary_all_tasks(bps_dict, save_path):
 
 
 def run_evaluation():
-    """主评估函数"""
+    """Main evaluation function."""
     
-    # 设置随机种子
+    # Set random seed for reproducibility
     set_seed(42)
     
-    # 创建输出目录
+    # Create output directory
     os.makedirs(SAVE_DIR, exist_ok=True)
     logger.info(f"Output directory: {SAVE_DIR}")
     
-    # 检查模型路径
+    # Check model path
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(f"Model checkpoint not found: {MODEL_PATH}")
     logger.info(f"Loading model from: {MODEL_PATH}")
     
-    # 1. 加载模型和数据
+    # 1. Load model and data
     model, accelerator, dataset, dataloader = load_model_data_local(
         model_config=MODEL_CONFIG,
         trainer_config=TRAINER_CONFIG,
@@ -155,7 +155,7 @@ def run_evaluation():
         num_sessions=1
     )
     
-    # 获取数据集信息
+    # Get dataset information
     n_neurons = len(dataset['cluster_regions'][0])
     regions = np.array(dataset['cluster_regions'][0])
     unique_regions = np.unique(regions)
@@ -164,11 +164,11 @@ def run_evaluation():
     logger.info(f"  - Regions: {list(unique_regions)}")
     logger.info(f"  - Trials: {len(dataset)}")
     
-    # 存储所有任务的 BPS 结果
+    # Store BPS results for all tasks
     all_bps = {}
     summary_metrics = {}
     
-    # 2. 循环执行四个任务
+    # 2. Loop through all four tasks
     for task_name, task_cfg in TASKS.items():
         print(f"\n{'='*60}")
         print(f"Running Task: {task_name} - {task_cfg['description']}")
@@ -177,7 +177,7 @@ def run_evaluation():
         task_save_path = os.path.join(SAVE_DIR, task_name)
         os.makedirs(task_save_path, exist_ok=True)
         
-        # 执行评估
+        # Execute evaluation
         metrics = co_smoothing_eval(
             model=model,
             accelerator=accelerator,

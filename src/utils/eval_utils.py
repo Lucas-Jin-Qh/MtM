@@ -50,41 +50,40 @@ def load_model_data_local(**kwargs):
     stitching = kwargs.get('stitching', False)
     num_sessions = kwargs.get('num_sessions', 1)
 
-    # set seed
+    # Set seed for reproducibility
     set_seed(seed)
 
-    # load the model config
+    # Load the model config
     config = config_from_kwargs({"model": f"include:{model_config}"})
     config = update_config(model_config, config)
     config = update_config(trainer_config, config)
-    # masking mode
+    # Set masking mode
     mask_mode = mask_name.split("_")[1] if "_" in mask_name else mask_name
     config.model.encoder.masker.mode = mask_mode
 
     accelerator = Accelerator()
 
-    # ----- load dataset (prefer local) -----
+    # ----- Load dataset (prefer local) -----
     dataset = None
     meta_data = {}
     if dataset_path and os.path.isdir(dataset_path):
         try:
-            # load the whole DatasetDict then select "test"
+            # Load the whole DatasetDict then select "test"
             ds_dict = load_from_disk(dataset_path)
             if isinstance(ds_dict, dict) and "test" in ds_dict:
                 dataset = ds_dict["test"]
                 logger.info(f"Loaded local test split from {dataset_path}")
             else:
-                # maybe it's already a single dataset (no split)
+                # Maybe it's already a single dataset (no split)
                 dataset = ds_dict
                 logger.info(f"Loaded local dataset (no splits) from {dataset_path}")
-            # try to load session metadata if present
+            # Try to load session metadata if present
             meta_json = os.path.join(dataset_path, "session_metadata.json")
             if os.path.exists(meta_json):
                 with open(meta_json, "r") as fh:
                     meta_data = json.load(fh)
                 logger.info("Loaded session_metadata.json")
                 # Ensure num_neurons is in meta_data (required by NDT1 model)
-                # NeuralStitcher expects num_neurons as a list
                 if "num_neurons" not in meta_data:
                     # Try to infer from cluster_regions length
                     if "cluster_regions" in meta_data:
@@ -94,13 +93,13 @@ def load_model_data_local(**kwargs):
                         # Will be inferred later from dataset
                         logger.warning("No cluster_regions in metadata, num_neurons will be inferred later")
                 elif isinstance(meta_data.get("num_neurons"), int):
-                    # Convert to list format for NeuralStitcher
+                    # Convert to list format for single session
                     meta_data["num_neurons"] = [meta_data["num_neurons"]]
                     logger.info(f"Converted num_neurons to list: {meta_data['num_neurons']}")
         except Exception as e:
             logger.warning(f"Failed to load local dataset from {dataset_path}: {e}")
 
-    # fallback to huggingface if needed
+    # Fallback to huggingface if needed
     if dataset is None:
         logger.info("Falling back to huggingface dataset")
         try:
@@ -119,14 +118,14 @@ def load_model_data_local(**kwargs):
         except Exception as ex:
             raise RuntimeError(f"Unable to load dataset (local or hf): {ex}")
 
-    # ----- infer n_neurons -----
+    # ----- Infer n_neurons -----
     try:
         n_neurons = len(dataset['cluster_regions'][0])
     except Exception:
-        # fallback from metadata
+        # Fallback from metadata
         n_neurons = meta_data.get("num_neurons")
         if n_neurons is None:
-            # try to infer from spikes shape in first example
+            # Try to infer from spikes shape in first example
             first = dataset[0]
             spikes = first.get('spikes_data')
             if spikes is not None:
@@ -140,25 +139,24 @@ def load_model_data_local(**kwargs):
     logger.info(f"Number of neurons in dataset: {n_neurons}")
 
     # Ensure num_neurons is in meta_data for model initialization
-    # NeuralStitcher expects num_neurons as a list (one value per session)
     if "num_neurons" not in meta_data:
-        meta_data["num_neurons"] = [n_neurons]  # wrap in list for single session
+        meta_data["num_neurons"] = [n_neurons]
         logger.info(f"Added num_neurons to meta_data as list: {meta_data['num_neurons']}")
     elif isinstance(meta_data["num_neurons"], int):
         meta_data["num_neurons"] = [meta_data["num_neurons"]]
         logger.info(f"Converted num_neurons to list: {meta_data['num_neurons']}")
 
-    # ----- build model -----
+    # ----- Build model -----
     model_class = NAME2MODEL.get(config.model.model_class)
     if model_class is None:
         raise RuntimeError(f"Unknown model class: {config.model.model_class}")
     model = model_class(config.model, **config.method.model_kwargs, **meta_data)
 
-    # ----- load checkpoint -----
+    # ----- Load checkpoint -----
     if model_path is None:
         raise RuntimeError("model_path must be provided")
     if os.path.isdir(model_path):
-        # look for common checkpoint names
+        # Look for common checkpoint names
         for cand in ("model_best.pt", "model.pt", "model.pth"):
             cand_path = os.path.join(model_path, cand)
             if os.path.exists(cand_path):
@@ -166,7 +164,7 @@ def load_model_data_local(**kwargs):
                 break
     logger.info(f"Loading checkpoint from {model_path}")
     ckpt = torch.load(model_path, map_location="cpu")
-    # support multiple formats
+    # Support multiple formats
     if isinstance(ckpt, dict):
         if "model" in ckpt:
             loaded = ckpt["model"]
@@ -180,13 +178,13 @@ def load_model_data_local(**kwargs):
                     model.load_state_dict(ckpt[k], strict=False)
                     break
         else:
-            # assume the dict values are state dicts (legacy)
+            # Assume the dict values are state dicts (legacy)
             model.load_state_dict(ckpt, strict=False)
     else:
-        # checkpoint is the model object itself
+        # Checkpoint is the model object itself
         model = ckpt
 
-    # ----- configure masker -----
+    # ----- Configure masker -----
     model.encoder.masker.mode = mask_mode
     model.encoder.masker.force_active = False
     logger.info(f"(eval) masking mode: {model.encoder.masker.mode}")
@@ -198,7 +196,7 @@ def load_model_data_local(**kwargs):
 
     model = accelerator.prepare(model)
 
-    # ----- build dataloader -----
+    # ----- Build dataloader -----
     if config.model.model_class in ["NDT1", "iTransformer"]:
         max_space_length = n_neurons
     elif config.model.model_class == "STPatch":
@@ -221,7 +219,7 @@ def load_model_data_local(**kwargs):
         shuffle=False,
     )
 
-    # quick sanity check
+    # Quick sanity check
     for batch in dataloader:
         logger.info(f"spike data shape: {batch['spikes_data'].shape}")
         break
@@ -230,7 +228,7 @@ def load_model_data_local(**kwargs):
 
 # --------------------------------------------------------------------------------------------------
 # Evaluation
-# 1. Co-smoothing_eval (R2, co-bps, and shuqi's plot) 
+# 1. Co-smoothing_eval (R2, co-bps, and single-neuron visualization)
 # 2. Behavior_decoding (choice, wheel speed)
 # 3. R2 scatter plot
 # --------------------------------------------------------------------------------------------------
@@ -254,11 +252,11 @@ def co_smoothing_eval(
     target_regions = kwargs['target_regions']
     n_jobs = kwargs['n_jobs']
 
-    # hack to accommodate NDT2 - fix later 
+    # Determine total number of neurons
     if sum(batch['space_attn_mask'][0] == 0) == 0:
         tot_num_neurons = batch['space_attn_mask'].size()[-1]
     else:
-        tot_num_neurons = (batch['space_attn_mask'][0] == 0).nonzero().min().item() 
+        tot_num_neurons = (batch['space_attn_mask'][0] == 0).nonzero().min().item()
     uuids_list = np.array(test_dataset['cluster_uuids'][0])[:tot_num_neurons]
     region_list = np.array(test_dataset['cluster_regions'])[0][:tot_num_neurons]
 
@@ -267,15 +265,15 @@ def co_smoothing_eval(
 
     if is_aligned:
 
-        # prepare the condition matrix
+        # Prepare the condition matrix for behavior variables
         b_list = []
 
-        # choice (always required)
+        # Choice (always required)
         choice = np.array(test_dataset['choice'])
         choice = np.tile(np.reshape(choice, (choice.shape[0], 1)), (1, T))
         b_list.append(choice)
 
-        # reward (optional - provide zeros if not in dataset)
+        # Reward (optional - provide zeros if not in dataset)
         if 'reward' in test_dataset.column_names:
             reward = np.array(test_dataset['reward'])
         else:
@@ -284,7 +282,7 @@ def co_smoothing_eval(
         reward = np.tile(np.reshape(reward, (reward.shape[0], 1)), (1, T))
         b_list.append(reward)
 
-        # block (optional - provide constant value if not in dataset)
+        # Block (optional - provide constant value if not in dataset)
         if 'block' in test_dataset.column_names:
             block = np.array(test_dataset['block'])
         else:
@@ -300,6 +298,8 @@ def co_smoothing_eval(
                         'reward': [1],
                         'wheel': [3],
                         }
+
+        # Use original IBL encoding (choice: -1/1, block: 0.2/0.5/0.8, reward: 0/1)
         var_value2label = {'block': {(0.2,): "p(left)=0.2",
                                      (0.5,): "p(left)=0.5",
                                      (0.8,): "p(left)=0.8", },
@@ -307,13 +307,14 @@ def co_smoothing_eval(
                                       (1.0,): "left"},
                            'reward': {(0.,): "no reward",
                                       (1.,): "reward", }}
+
         var_tasklist = ['block', 'choice', 'reward']
         var_behlist = []
 
     if mode == 'per_neuron':
         
         bps_result_list, r2_result_list = [float('nan')] * tot_num_neurons, [np.array([np.nan, np.nan])] * N
-        # loop through all the neurons
+        # Loop through all neurons
         counter = 0
         for n_i in tqdm(range(0, tot_num_neurons+n_jobs, n_jobs)):    
             if counter >= tot_num_neurons:
@@ -367,7 +368,7 @@ def co_smoothing_eval(
             pred_spikes = outputs.preds.detach().cpu().numpy()
             tot_num_trials = len(batch['spikes_data'])
 
-            # compute co-bps
+            # Compute co-bps
             for i in range(n_jobs):
                 if n_i+i < tot_num_neurons:
                     gt_held_out = gt_spikes[i*tot_num_trials:(i+1)*tot_num_trials, :, [n_i+i]]
@@ -378,7 +379,7 @@ def co_smoothing_eval(
                         bps = np.nan
                     bps_result_list[n_i+i] = bps
         
-                    # compute R2
+                    # Compute R2
                     if is_aligned:
                         X = behavior_set  # [#trials, #timesteps, #variables]
                         _r2_psth, _r2_trial = viz_single_cell(X, gt_held_out.squeeze(), pred_held_out.squeeze(),
@@ -387,15 +388,15 @@ def co_smoothing_eval(
                                                               aligned_tbins=kwargs['onset_alignment'],
                                                               neuron_idx=uuids_list[n_i+i][:4],
                                                               neuron_region=region_list[n_i+i],
-                                                              method=method_name, save_path=kwargs['save_path'])
+                                                              method=method_name, save_path=kwargs['save_path'],
+                                                              save_plot=True)
                         r2_result_list[n_i+i] = np.array([_r2_psth, _r2_trial])
                     else:
                         r2 = viz_single_cell_unaligned(
                             gt_held_out.squeeze(), pred_held_out.squeeze(), 
                             neuron_idx=uuids_list[n_i+i][:4],
                             neuron_region=region_list[n_i+i],
-                            method=method_name, save_path=kwargs['save_path']
-                        )
+                            method=method_name, save_path=kwargs['save_path'], save_plot=True)
                         r2_result_list[n_i+i] = r2
                 else:
                     break
@@ -406,7 +407,13 @@ def co_smoothing_eval(
 
         assert held_out_list is not None, 'forward_pred requires specific target time points to predict'
         target_regions = neuron_regions = None
-        held_out_list = [held_out_list]
+        
+        # Ensure held_out_list is in list-of-lists format
+        if isinstance(held_out_list[0], (list, np.ndarray)):
+            held_out_list = [list(h) for h in held_out_list]
+        else:
+            # Single time point or list of time points
+            held_out_list = [held_out_list] if not isinstance(held_out_list, list) else [held_out_list]
 
         bps_result_list, r2_result_list = [float('nan')] * tot_num_neurons, [np.array([np.nan, np.nan])] * N
         for hd_idx in held_out_list:
@@ -440,7 +447,7 @@ def co_smoothing_eval(
                         eval_mask=mask_result['eval_mask'],
                         masking_mode=masking_mode,
                         num_neuron=batch['spikes_data'].shape[2],
-                        eid=batch['eid'][0]  # each batch consists of data from the same eid
+                        eid=batch['eid'][0]
                     )
             outputs.preds = torch.exp(outputs.preds)
         
@@ -450,7 +457,7 @@ def co_smoothing_eval(
             target_neuron_idxs = np.arange(tot_num_neurons)
             target_time_idxs = held_out_list[0]
 
-            # compute co-bps
+            # Compute co-bps
             gt_held_out = gt_spikes[:, target_time_idxs][:,:,target_neuron_idxs]
             pred_held_out = pred_spikes[:, target_time_idxs][:,:,target_neuron_idxs]
     
@@ -460,11 +467,11 @@ def co_smoothing_eval(
                     bps = np.nan
                 bps_result_list[target_neuron_idxs[n_i]] = bps
 
-            # compute R2
+            # Compute R2
             ys = gt_spikes[:, target_time_idxs]
             y_preds = pred_spikes[:, target_time_idxs]
     
-            # choose the neuron to plot
+            # Select neurons to plot
             idxs = target_neuron_idxs
     
             for i in tqdm(range(idxs.shape[0]), desc='R2'):
@@ -476,14 +483,15 @@ def co_smoothing_eval(
                                                           aligned_tbins=[],
                                                           neuron_idx=uuids_list[idxs[i]][:4],
                                                           neuron_region=region_list[idxs[i]],
-                                                          method=method_name, save_path=kwargs['save_path']);
+                                                          method=method_name, save_path=kwargs['save_path'],
+                                                          save_plot=True);
                     r2_result_list[idxs[i]] = np.array([_r2_psth, _r2_trial])
                 else:
                     r2 = viz_single_cell_unaligned(
                         ys[:, :, idxs[i]], y_preds[:, :, idxs[i]], 
                         neuron_idx=uuids_list[idxs[i]][:4],
                         neuron_region=region_list[idxs[i]],
-                        method=method_name, save_path=kwargs['save_path']
+                        method=method_name, save_path=kwargs['save_path'], save_plot=True
                     )
                     r2_result_list[idxs[i]] = r2
 
@@ -492,18 +500,16 @@ def co_smoothing_eval(
         if 'all' in target_regions:
             target_regions = list(np.unique(region_list))
             
-        held_out_list = kwargs['held_out_list']
+        held_out_list = kwargs.get('held_out_list')
 
         assert held_out_list is None, 'inter_region does LOO for all neurons in the target region'
 
         bps_result_list, r2_result_list = [float('nan')] * tot_num_neurons, [np.array([np.nan, np.nan])] * N
         for region in tqdm(target_regions, desc='region'):
-            print(region)
-            hd = np.argwhere(region_list==region).flatten() 
-            held_out_list = np.arange(len(hd))
-            held_out_list = [held_out_list]   
-            hd = np.array([held_out_list]).flatten()
-
+            logger.info(f"Processing region: {region}")
+            # Get indices of neurons in this region (relative indices)
+            region_indices = np.arange(len(np.argwhere(region_list == region).flatten()))
+            
             model.eval()
             with torch.no_grad():
                 for batch in test_dataloader:
@@ -512,7 +518,7 @@ def co_smoothing_eval(
                     mask_result = heldout_mask(
                         batch['spikes_data'].clone(),
                         mode=mode,
-                        heldout_idxs=hd,
+                        heldout_idxs=region_indices,  # Pass relative indices of neurons within region
                         target_regions=[region],
                         neuron_regions=region_list
                     )              
@@ -541,7 +547,7 @@ def co_smoothing_eval(
             target_neuron_idxs = mask_result['heldout_idxs']
             target_time_idxs = np.arange(gt_spikes.shape[1])
 
-            # compute co-bps
+            # Compute co-bps
             gt_held_out = gt_spikes[:, target_time_idxs][:,:,target_neuron_idxs]
             pred_held_out = pred_spikes[:, target_time_idxs][:,:,target_neuron_idxs]
     
@@ -551,29 +557,30 @@ def co_smoothing_eval(
                     bps = np.nan
                 bps_result_list[target_neuron_idxs[n_i]] = bps
 
-            # compute R2
+            # Compute R2
             ys = gt_spikes[:, target_time_idxs]
             y_preds = pred_spikes[:, target_time_idxs]
     
-            # choose the neuron to plot
+            # Select neurons to plot
             idxs = target_neuron_idxs
             for i in range(idxs.shape[0]):
                 if is_aligned:
-                    X = behavior_set[:, target_time_idxs, :]  # [#trials, #timesteps, #variables]
+                    X = behavior_set[:, target_time_idxs, :]
                     _r2_psth, _r2_trial = viz_single_cell(X, ys[:, :, idxs[i]], y_preds[:, :, idxs[i]],
                                                           var_name2idx, var_tasklist, var_value2label, var_behlist,
                                                           subtract_psth=kwargs['subtract'],
                                                           aligned_tbins=[],
                                                           neuron_idx=uuids_list[idxs[i]][:4],
                                                           neuron_region=region_list[idxs[i]],
-                                                          method=method_name, save_path=kwargs['save_path']);
+                                                          method=method_name, save_path=kwargs['save_path'],
+                                                          save_plot=True);
                     r2_result_list[idxs[i]] = np.array([_r2_psth, _r2_trial])
                 else:
                     r2 = viz_single_cell_unaligned(
                         ys[:, :, idxs[i]], y_preds[:, :, idxs[i]], 
                         neuron_idx=uuids_list[idxs[i]][:4],
                         neuron_region=region_list[idxs[i]],
-                        method=method_name, save_path=kwargs['save_path']
+                        method=method_name, save_path=kwargs['save_path'], save_plot=True
                     )
                     r2_result_list[idxs[i]] = r2
                         
@@ -582,12 +589,12 @@ def co_smoothing_eval(
         if 'all' in target_regions:
             target_regions = list(np.unique(region_list))
             
-        held_out_list = kwargs['held_out_list']
+        held_out_list = kwargs.get('held_out_list')
         assert held_out_list is None, 'intra_region does LOO for all neurons in the target region'
 
         bps_result_list, r2_result_list = [float('nan')] * tot_num_neurons, [np.array([np.nan, np.nan])] * N
         for region in tqdm(target_regions, desc='region'):
-            print(region)
+            logger.info(f"Processing region: {region}")
             target_neuron_idxs = np.argwhere(region_list==region).flatten() 
             held_out_list = list(range(0, len(target_neuron_idxs)+n_jobs, n_jobs))
 
@@ -667,20 +674,21 @@ def co_smoothing_eval(
                                                               aligned_tbins=[],
                                                               neuron_idx=uuids_list[heldout_idxs[i]][:4],
                                                               neuron_region=region_list[heldout_idxs[i]],
-                                                              method=method_name, save_path=kwargs['save_path']);
+                                                              method=method_name, save_path=kwargs['save_path'],
+                                                              save_plot=True);
                         r2_result_list[heldout_idxs[i]] = np.array([_r2_psth, _r2_trial])
                     else:
                         r2 = viz_single_cell_unaligned(
                             gt_held_out.squeeze(), pred_held_out.squeeze(),
                             neuron_idx=uuids_list[heldout_idxs[i]][:4],
                             neuron_region=region_list[heldout_idxs[i]],
-                            method=method_name, save_path=kwargs['save_path']
+                            method=method_name, save_path=kwargs['save_path'], save_plot=True
                         )
                         r2_result_list[heldout_idxs[i]] = r2
     else:
         raise NotImplementedError('mode not implemented')
 
-    # save co-bps
+    # Save co-bps
     os.makedirs(kwargs['save_path'], exist_ok=True)
     bps_all = np.array(bps_result_list)
     bps_mean = np.nanmean(bps_all)
@@ -692,7 +700,7 @@ def co_smoothing_eval(
     plt.savefig(os.path.join(kwargs['save_path'], f'bps.png'), dpi=200)
     np.save(os.path.join(kwargs['save_path'], f'bps.npy'), bps_all)
     
-    # save R2
+    # Save R2
     r2_all = np.array(r2_result_list)
     np.save(os.path.join(kwargs['save_path'], f'r2.npy'), r2_all)
 
@@ -1198,24 +1206,42 @@ def heldout_mask(
         mask[:, :, hd] = 0
 
     elif mode == 'inter_region':
+        # inter_region: mask entire region, targets are the masked region neurons
+        # heldout_idxs: indices of neurons to evaluate within the region (relative indices), empty means evaluate all neurons in region
         hd = []
         for region in target_regions:
-            region_idxs = np.argwhere(neuron_regions == region).flatten()
-            mask[:, :, region_idxs] = 0 
-            target_idxs = region_idxs[heldout_idxs]
-            hd.append(target_idxs)
-        hd = np.stack(hd).flatten()
+            region_idxs = np.argwhere(neuron_regions == region).flatten()  # Relative indices within region
+            # Mask entire region
+            mask[:, :, region_idxs] = 0
+            # heldout_idxs should be indices of neurons to evaluate within the region
+            if len(heldout_idxs) > 0 and heldout_idxs is not None:
+                # Use the passed relative indices
+                target_relative_idxs = heldout_idxs
+            else:
+                # If heldout_idxs not specified, evaluate all neurons in region (use relative indices 0 to len(region_idxs)-1)
+                target_relative_idxs = np.arange(len(region_idxs))
+            target_global_idxs = region_idxs[target_relative_idxs]
+            hd.append(target_global_idxs)
+        hd = np.concatenate(hd) if hd else np.array([])
 
     elif mode == 'intra_region':
+        # intra_region: mask all neurons EXCEPT target region, then selectively evaluate within target region
         mask *= 0
         hd = []
         for region in target_regions:
             region_idxs = np.argwhere(neuron_regions == region).flatten()
+            # Unmask target region
             mask[:, :, region_idxs] = 1 
-            target_idxs = region_idxs[heldout_idxs]
-            mask[:, :, target_idxs] = 0
-            hd.append(target_idxs)
-        hd = np.stack(hd).flatten()
+            # heldout_idxs should be indices of neurons to evaluate within the region (relative indices)
+            if len(heldout_idxs) > 0:
+                target_idxs = region_idxs[heldout_idxs]
+                mask[:, :, target_idxs] = 0  # Mask for evaluation
+                hd.append(target_idxs)
+            else:
+                # If heldout_idxs not specified, evaluate all neurons in region
+                mask[:, :, region_idxs] = 0
+                hd.append(region_idxs)
+        hd = np.concatenate(hd) if hd else np.array([])
             
     elif mode == 'forward_pred':
         hd = heldout_idxs
@@ -1357,7 +1383,7 @@ def plot_psth(X, y, y_pred, var_tasklist, var_name2idx, var_value2label,
                 ax.legend()
                 ax.set_title(f"{var}")
 
-    # compute PSTH for task_contingency
+    # Compute PSTH for task_contingency
     idxs_psth = np.concatenate([var_name2idx[var] for var in var_tasklist])
     psth_xy = compute_all_psth(X, y, idxs_psth)
     psth_pred_xy = compute_all_psth(X, y_pred, idxs_psth)

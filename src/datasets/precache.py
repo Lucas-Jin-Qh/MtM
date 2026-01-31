@@ -54,6 +54,7 @@ def load_params(params_arg: str | None) -> dict:
         "behavior_keys": DISCRETE_BEHAVIOR + CONTINUOUS_BEHAVIOR,
         "fr_threshold": 1.0,  # 1 Hz
         "smoothing_sigma": 0.5, # 0.5 bins ~ 0.0167s
+        "use_raw_encoding": True,  # Use original IBL encoding (choice: -1/1, block: 0.2/0.5/0.8)
     }
     if params_arg is None:
         return default_params
