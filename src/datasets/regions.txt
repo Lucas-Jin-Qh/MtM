@@ -1,7 +1,0 @@
-CA1
-CA3
-DG
-LGd
-LP
-PO
-VISa

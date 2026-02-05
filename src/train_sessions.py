@@ -80,8 +80,11 @@ if config.data.use_aligned_test:
                                                          seed=config.seed)
 num_sessions = len(meta_data["eids"])
 # make log dir
+# Include eid in path for multi-session organization
+eid_short = eid[:8]  # Use first 8 chars of eid for brevity
 log_dir = os.path.join(config.dirs.log_dir, 
                        "train", 
+                       "eid_{}".format(eid_short),
                        "num_session_{}".format(num_sessions), 
                        "model_{}".format(config.model.model_class), 
                        "method_{}".format(config.method.model_kwargs.method_name), 
@@ -93,7 +96,7 @@ if not os.path.exists(log_dir):
 # wandb
 if config.wandb.use:
     import wandb
-    wandb.init(project=config.wandb.project, entity=config.wandb.entity, config=config, name="train_model_{}_num_session_{}_method_{}_mask_{}_stitch_{}".format(config.model.model_class, num_sessions,config.method.model_kwargs.method_name,config.encoder.masker.mode, config.encoder.stitching))
+    wandb.init(project=config.wandb.project, entity=config.wandb.entity, config=config, name="train_eid_{}_model_{}_num_session_{}_method_{}_mask_{}_stitch_{}".format(eid_short, config.model.model_class, num_sessions, config.method.model_kwargs.method_name, config.encoder.masker.mode, config.encoder.stitching))
 
 # make the dataloader
 train_dataloader = make_loader(train_dataset, 

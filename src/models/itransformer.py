@@ -14,7 +14,7 @@ ACT2FN["softsign"] = nn.Softsign
 from utils.config_utils import DictConfig, update_config
 from models.model_output import ModelOutput
 from models.masker import Masker
-DEFAULT_CONFIG = "src/configs/itransformer.yaml"
+DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), '..', 'configs', 'itransformer.yaml')
 
 
 @dataclass

@@ -11,7 +11,7 @@ wandb:
   use: true
   entity: null
   project: single-session
-  run_name: 4b00df29
+  run_name: 671c7ea7
 
 # Logging directories
 dirs:
@@ -21,10 +21,10 @@ dirs:
   # dataset_dir: /home/ppwang/neural-data-transformers/data/lfads_lorenz.h5
   pretrained_model_path: checkpoints/train/multi_sessions/model_NDT1/method_ssl/mask_combined/model_best.pt
   # dataset_dir: berkott/ibl_ssl_data
-  aligned_data_dir: "data/4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
+  aligned_data_dir: "data/671c7ea7-6726-4fbe-adeb-f89c2c8e489b_aligned"
   huggingface_org: ibl-foundation-model
-  dataset_dir: ibl-foundation-model/4b00df29-3769-43be-bb40-128b1cba6d35_aligned
-  behav_dir: "4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
+  dataset_dir: ibl-foundation-model/671c7ea7-6726-4fbe-adeb-f89c2c8e489b_aligned
+  behav_dir: "671c7ea7-6726-4fbe-adeb-f89c2c8e489b_aligned"
   
 
 
@@ -66,7 +66,7 @@ data:
   use_lograte: True # use lograte
 
   max_time_length: 60    # max_time_length has to be a multiple of time patch size
-  max_space_length: 427   # max_space_length has to be a multiple of space patch size
+  max_space_length: 668   # max_space_length has to be a multiple of space patch size
   patching: false # patching the neurons
   dataset_kwargs:
     max_time_length: 60
@@ -88,7 +88,7 @@ data:
   split_method: predefined # random_split/session_based/predefined
 
   # For single-session training specify the session EID here
-  train_session_eid: ["4b00df29-3769-43be-bb40-128b1cba6d35"]
+  train_session_eid: ["671c7ea7-6726-4fbe-adeb-f89c2c8e489b"]
 
   use_aligned_test: False
   load_meta: true

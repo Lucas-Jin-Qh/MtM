@@ -13,8 +13,8 @@ print('='*60)
 print('Working directory:', work_dir)
 print('='*60)
 
-# Add src path
-sys.path.append(os.path.join(work_dir))
+# Add src path (add parent directory so 'src' module can be found)
+sys.path.append(os.path.dirname(work_dir))
 
 from src.utils.eval_utils import load_model_data_local, co_smoothing_eval
 
@@ -22,8 +22,11 @@ from src.utils.eval_utils import load_model_data_local, co_smoothing_eval
 # 1. Configuration
 # ========================
 
-model_path = '../results/train/num_session_1/model_NDT1/method_ssl/mask_all/stitch_True/model_best.pt'
+model_path = '../results/train/eid_4b00df29/num_session_1/model_NDT1/method_ssl/mask_all/stitch_True/model_best.pt'
 dataset_path = '../data/4b00df29-3769-43be-bb40-128b1cba6d35_aligned'
+
+# Extract eid from dataset_path for organizing eval results
+dataset_eid = os.path.basename(dataset_path).split('_')[0]  # "4b00df29-3769-43be-bb40-128b1cba6d35_aligned" -> "4b00df29"
 
 configs = {
     'model_config': 'configs/ndt1.yaml',
@@ -106,7 +109,7 @@ for task_name, task_config in tasks.items():
     print(f"Description: {task_config['description']}")
     print('='*60)
 
-    save_path = f'figs/eval/{task_name}'
+    save_path = f'figs/eval/eid_{dataset_eid}/{task_name}'
 
     eval_configs = {
         'subtract': 'task',

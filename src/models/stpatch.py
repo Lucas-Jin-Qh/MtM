@@ -20,9 +20,9 @@ from models.region_lookup import RegionLookup
 from utils.config_utils import DictConfig, update_config
 from models.model_output import ModelOutput
 
-DEFAULT_CONFIG = "src/configs/stpatch.yaml"
+DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), '..', 'configs', 'stpatch.yaml')
 
-with open('data/target_eids.txt') as file:
+with open(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'target_eids.txt')) as file:
     include_eids = [line.rstrip() for line in file]
 
 @dataclass

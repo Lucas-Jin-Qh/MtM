@@ -26,15 +26,16 @@ from utils.utils import set_seed
 # ================= Configuration =================
 # Session Configuration
 EID = "4b00df29-3769-43be-bb40-128b1cba6d35"
+EID_SHORT = EID[:8]  # Use first 8 chars for directory names
 
 # Base path
 BASE_DIR = "/home/jqh/Workspace/IBL foundation model/MtM"
 
 # Model path
-MODEL_PATH = f"{BASE_DIR}/results/train/num_session_1/model_NDT1/method_ssl/mask_all/stitch_True/model_best.pt"
+MODEL_PATH = f"{BASE_DIR}/results/train/eid_{EID_SHORT}/num_session_1/model_NDT1/method_ssl/mask_all/stitch_True/model_best.pt"
 
-# Output directory
-SAVE_DIR = f"{BASE_DIR}/results/eval_figures"
+# Output directory - include eid for multi-session organization
+SAVE_DIR = f"{BASE_DIR}/results/eval_figures/eid_{EID_SHORT}"
 
 # Dataset path
 DATASET_PATH = f"{BASE_DIR}/data/4b00df29-3769-43be-bb40-128b1cba6d35_aligned"
